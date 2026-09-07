@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -25,10 +24,7 @@ class WorkspaceLifecycleStore:
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             if idempotency_key:
-                cur.execute(
-                    "SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s",
-                    (idempotency_key,),
-                )
+                cur.execute("SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s", (idempotency_key,))
                 existing = cur.fetchone()
                 if existing is not None:
                     return Workspace.model_validate(existing)
@@ -36,12 +32,9 @@ class WorkspaceLifecycleStore:
                 """INSERT INTO public.product_workspaces
                 (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                (
-                    workspace.workspace_id, workspace.name, workspace.product_goal, workspace.status,
-                    workspace.priority, Jsonb([strategy.model_dump(mode="json") for strategy in workspace.strategies]),
-                    workspace.created_by, workspace.version, workspace.archived_at, idempotency_key,
-                    workspace.created_at, workspace.updated_at,
-                ),
+                (workspace.workspace_id, workspace.name, workspace.product_goal, workspace.status, workspace.priority,
+                 Jsonb([strategy.model_dump(mode="json") for strategy in workspace.strategies]), workspace.created_by,
+                 workspace.version, workspace.archived_at, idempotency_key, workspace.created_at, workspace.updated_at),
             )
             row = cur.fetchone()
             self._schedule(cur)
@@ -72,8 +65,7 @@ class WorkspaceLifecycleStore:
                 """UPDATE public.product_workspaces
                    SET name=%s, product_goal=%s, priority=%s, strategies=%s,
                        version=version+1, updated_at=now()
-                 WHERE workspace_id=%s AND version=%s AND status <> %s
-                 RETURNING *""",
+                 WHERE workspace_id=%s AND version=%s AND status <> %s RETURNING *""",
                 (name, product_goal, priority, Jsonb([s.model_dump(mode="json") for s in strategies]), workspace_id, expected_version, WorkspaceStatus.ARCHIVED),
             )
             row = cur.fetchone()
