@@ -93,13 +93,23 @@ def create_postgres_checkpointer(dsn: str) -> Any:
 
 
 def invoke_workflow(graph: Any, state: WorkflowState, thread_id: str) -> dict[str, Any]:
-    """Start or resume a workflow using a stable LangGraph thread identifier."""
+    """Start a workflow using a stable LangGraph thread identifier."""
     if not thread_id or len(thread_id) > 255:
         raise ValueError("thread_id must be between 1 and 255 characters")
     return graph.invoke(
         {"workflow": _encode(state)},
         {"configurable": {"thread_id": thread_id}},
     )
+
+
+def recover_workflow(graph: Any, thread_id: str) -> WorkflowState:
+    """Recover the latest checkpointed canonical workflow state."""
+    if not thread_id or len(thread_id) > 255:
+        raise ValueError("thread_id must be between 1 and 255 characters")
+    snapshot = graph.get_state({"configurable": {"thread_id": thread_id}})
+    if not snapshot.values:
+        raise WorkflowError("no checkpoint exists for workflow thread")
+    return _decode(snapshot.values["workflow"])
 
 
 def resume_with_human_decision(graph: Any, thread_id: str, decision: Decision) -> dict[str, Any]:
