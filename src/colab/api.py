@@ -17,6 +17,7 @@ from .operations import (
     ObservabilityRecorder,
     OperationalEvent,
 )
+from .production_persistence import PostgresPlatformStore
 from .productization import (
     ArtifactRecord,
     InMemoryArtifactStore,
@@ -28,6 +29,23 @@ from .productization import (
     Workspace,
     WorkspaceManager,
     build_artifact,
+)
+from .service_adapters import (
+    PostgresArtifactStore,
+    PostgresExecutionCoordinator,
+    PostgresKnowledgeBase,
+    PostgresObservabilityRecorder,
+    PostgresToolRegistry,
+    PostgresWorkspaceManager,
+    production_connection_factory_from_dsn,
+)
+from .service_contracts import (
+    ArtifactService,
+    ExecutionService,
+    KnowledgeService,
+    ObservabilityService,
+    ToolService,
+    WorkspaceService,
 )
 
 
@@ -78,15 +96,42 @@ class ExecutionFailure(ExecutionAction):
 
 
 class PlatformServices:
-    def __init__(self, max_concurrent: int = 2) -> None:
-        self.workspaces = WorkspaceManager(max_concurrent=max_concurrent)
-        self.artifacts = InMemoryArtifactStore()
-        self.knowledge = KnowledgeBase()
-        self.tools = ToolRegistry()
-        self.execution = ExecutionCoordinator(
-            lease_seconds=int(os.getenv("COLAB_EXECUTION_LEASE_SECONDS", "300"))
-        )
-        self.observability = ObservabilityRecorder()
+    """Compose local deterministic services or durable PostgreSQL services.
+
+    Production never silently falls back to in-memory state. A production process
+    without COLAB_DATABASE_DSN fails during service construction instead.
+    """
+
+    def __init__(self, max_concurrent: int = 2, database_dsn: str | None = None) -> None:
+        dsn = database_dsn or os.getenv("COLAB_DATABASE_DSN")
+        production = os.getenv("COLAB_ENV", "development").lower() == "production"
+        if production and not dsn:
+            raise RuntimeError("COLAB_DATABASE_DSN is required when COLAB_ENV=production")
+
+        self.database: PostgresPlatformStore | None = None
+        self.workspaces: WorkspaceService
+        self.artifacts: ArtifactService
+        self.knowledge: KnowledgeService
+        self.tools: ToolService
+        self.execution: ExecutionService
+        self.observability: ObservabilityService
+        lease_seconds = int(os.getenv("COLAB_EXECUTION_LEASE_SECONDS", "300"))
+        if dsn:
+            store = PostgresPlatformStore(production_connection_factory_from_dsn(dsn), max_concurrent)
+            self.database = store
+            self.workspaces = PostgresWorkspaceManager(store)
+            self.artifacts = PostgresArtifactStore(store)
+            self.knowledge = PostgresKnowledgeBase(store)
+            self.tools = PostgresToolRegistry(store)
+            self.execution = PostgresExecutionCoordinator(store, lease_seconds)
+            self.observability = PostgresObservabilityRecorder(store)
+        else:
+            self.workspaces = WorkspaceManager(max_concurrent=max_concurrent)
+            self.artifacts = InMemoryArtifactStore()
+            self.knowledge = KnowledgeBase()
+            self.tools = ToolRegistry()
+            self.execution = ExecutionCoordinator(lease_seconds=lease_seconds)
+            self.observability = ObservabilityRecorder()
         self._register_safe_defaults()
 
     def _register_safe_defaults(self) -> None:
@@ -120,12 +165,22 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(
         max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2"))
     )
-    app = FastAPI(title="Colab Agent Platform", version="0.4.0")
+    app = FastAPI(title="Colab Agent Platform", version="0.5.0")
     app.state.services = services
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "colab-agent-platform"}
+
+    @app.get("/ready")
+    def readiness() -> dict[str, str]:
+        if services.database is None:
+            return {"status": "ready", "database": "not_configured"}
+        try:
+            services.database.check_ready()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="database is not ready") from exc
+        return {"status": "ready", "database": "ok"}
 
     @app.get("/api/operations/metrics", response_model=MetricsSnapshot)
     def operations_metrics() -> MetricsSnapshot:
@@ -258,11 +313,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
                 workflow_id=job.workflow_id,
                 workspace_id=job.workspace_id,
                 job_id=job.job_id,
-                event_type=(
-                    "execution_failed"
-                    if job.status == "failed"
-                    else "execution_retry_scheduled"
-                ),
+                event_type=("execution_failed" if job.status == "failed" else "execution_retry_scheduled"),
                 level=EventLevel.ERROR if job.status == "failed" else EventLevel.WARNING,
                 actor=payload.worker_id,
                 message=job.error or "Execution failed.",
