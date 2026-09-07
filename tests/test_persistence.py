@@ -6,7 +6,15 @@ from uuid import uuid4
 
 import pytest
 
-from colab.contracts import AgentRole, AgentTask, Artifact, Decision, RiskAssessment, Stage, WorkflowState
+from colab.contracts import (
+    AgentRole,
+    AgentTask,
+    Artifact,
+    Decision,
+    RiskAssessment,
+    Stage,
+    WorkflowState,
+)
 from colab.persistence import (
     ConcurrentWorkflowUpdate,
     PersistenceError,
@@ -168,7 +176,7 @@ def test_load_missing_workflow_raises() -> None:
         repository.load(uuid4())
 
 
-def test_load_fails_if_decision_offset_row_is_missing() -> None:
+def test_save_fails_if_decision_offset_row_is_missing() -> None:
     cursor = FakeCursor(rows=[(1,)])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     with pytest.raises(PersistenceError, match="decision offset"):
