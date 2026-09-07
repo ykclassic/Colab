@@ -40,56 +40,53 @@ class PostgresWorkflowRepository:
 
     def create(self, state: WorkflowState) -> int:
         payload = state.model_dump(mode="json")
-        with self._connection() as conn, conn.transaction():
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO public.workflows
-                    (workflow_id, schema_version, product_goal, product_brief, roadmap,
-                     current_stage, iteration_count, budgets, final_package, version)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1)""",
-                    (state.workflow_id, state.schema_version, state.product_goal, state.product_brief,
-                     state.roadmap, state.current_stage.value, state.iteration_count, state.budgets,
-                     state.final_package),
-                )
-                self._write_children(cur, state, 0, 0)
-                self._write_checkpoint(cur, state, 1, payload)
+        with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO public.workflows
+                (workflow_id, schema_version, product_goal, product_brief, roadmap,
+                 current_stage, iteration_count, budgets, final_package, version)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1)""",
+                (state.workflow_id, state.schema_version, state.product_goal, state.product_brief,
+                 state.roadmap, state.current_stage.value, state.iteration_count, state.budgets,
+                 state.final_package),
+            )
+            self._write_children(cur, state, 0, 0)
+            self._write_checkpoint(cur, state, 1, payload)
         return 1
 
     def load(self, workflow_id: UUID) -> tuple[WorkflowState, int]:
-        with self._connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute("SELECT * FROM public.workflows WHERE workflow_id=%s", (workflow_id,))
-                workflow = cur.fetchone()
-                if workflow is None:
-                    raise WorkflowNotFound(str(workflow_id))
-                return self._load_state(cur, workflow), int(workflow["version"])
+        with self._connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("SELECT * FROM public.workflows WHERE workflow_id=%s", (workflow_id,))
+            workflow = cur.fetchone()
+            if workflow is None:
+                raise WorkflowNotFound(str(workflow_id))
+            return self._load_state(cur, workflow), int(workflow["version"])
 
     def save(self, state: WorkflowState, expected_version: int) -> int:
         if expected_version < 1:
             raise ValueError("expected_version must be positive")
         new_version = expected_version + 1
         payload = state.model_dump(mode="json")
-        with self._connection() as conn, conn.transaction():
-            with conn.cursor() as cur:
-                cur.execute(
-                    """UPDATE public.workflows
-                       SET schema_version=%s, product_goal=%s, product_brief=%s, roadmap=%s,
-                           current_stage=%s, iteration_count=%s, budgets=%s, final_package=%s, version=%s
-                     WHERE workflow_id=%s AND version=%s""",
-                    (state.schema_version, state.product_goal, state.product_brief, state.roadmap,
-                     state.current_stage.value, state.iteration_count, state.budgets, state.final_package,
-                     new_version, state.workflow_id, expected_version),
+        with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute(
+                """UPDATE public.workflows
+                   SET schema_version=%s, product_goal=%s, product_brief=%s, roadmap=%s,
+                       current_stage=%s, iteration_count=%s, budgets=%s, final_package=%s, version=%s
+                 WHERE workflow_id=%s AND version=%s""",
+                (state.schema_version, state.product_goal, state.product_brief, state.roadmap,
+                 state.current_stage.value, state.iteration_count, state.budgets, state.final_package,
+                 new_version, state.workflow_id, expected_version),
+            )
+            if cur.rowcount != 1:
+                raise ConcurrentWorkflowUpdate(
+                    f"workflow {state.workflow_id} changed since version {expected_version}"
                 )
-                if cur.rowcount != 1:
-                    raise ConcurrentWorkflowUpdate(
-                        f"workflow {state.workflow_id} changed since version {expected_version}"
-                    )
-                cur.execute("SELECT count(*) FROM public.workflow_decisions WHERE workflow_id=%s", (state.workflow_id,))
-                decision_offset = int(cur.fetchone()[0])
-                cur.execute("SELECT count(*) FROM public.workflow_approvals WHERE workflow_id=%s", (state.workflow_id,))
-                approval_offset = int(cur.fetchone()[0])
-                self._write_children(cur, state, decision_offset, approval_offset)
-                self._write_checkpoint(cur, state, new_version, payload)
+            cur.execute("SELECT count(*) FROM public.workflow_decisions WHERE workflow_id=%s", (state.workflow_id,))
+            decision_offset = int(cur.fetchone()[0])
+            cur.execute("SELECT count(*) FROM public.workflow_approvals WHERE workflow_id=%s", (state.workflow_id,))
+            approval_offset = int(cur.fetchone()[0])
+            self._write_children(cur, state, decision_offset, approval_offset)
+            self._write_checkpoint(cur, state, new_version, payload)
         return new_version
 
     @staticmethod
@@ -176,6 +173,8 @@ def connection_factory_from_dsn(dsn: str) -> ConnectionFactory:
     """Create a connection factory from a secret DSN without persisting the DSN."""
     if not dsn.strip():
         raise ValueError("database DSN must not be empty")
+
     def factory() -> Connection[Any]:
         return Connection.connect(dsn, row_factory=dict_row)
+
     return factory
