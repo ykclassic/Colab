@@ -37,6 +37,7 @@ class Workspace(BaseModel):
     status: str = WorkspaceStatus.QUEUED
     priority: int = Field(default=100, ge=0, le=1000)
     strategies: list[StrategySpec] = Field(default_factory=list)
+    created_by: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
