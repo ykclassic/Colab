@@ -1,7 +1,7 @@
 """HTTP routes for workspace lifecycle management."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -33,7 +33,8 @@ def _services(request: Request) -> Any:
 @router.patch("/{workspace_id}", response_model=Workspace)
 def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, request: Request) -> Workspace:
     try:
-        return _services(request).workspaces.update(workspace_id, payload.version, name=payload.name, product_goal=payload.product_goal, priority=payload.priority, strategies=payload.strategies)
+        result = _services(request).workspaces.update(workspace_id, payload.version, name=payload.name, product_goal=payload.product_goal, priority=payload.priority, strategies=payload.strategies)
+        return cast(Workspace, result)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except (RuntimeError, ValueError) as exc:
@@ -43,7 +44,8 @@ def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, request: Requ
 @router.post("/{workspace_id}/archive", response_model=Workspace)
 def archive_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Request) -> Workspace:
     try:
-        return _services(request).workspaces.archive(workspace_id, payload.version)
+        result = _services(request).workspaces.archive(workspace_id, payload.version)
+        return cast(Workspace, result)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except (RuntimeError, ValueError) as exc:
@@ -53,7 +55,8 @@ def archive_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Re
 @router.post("/{workspace_id}/restore", response_model=Workspace)
 def restore_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Request) -> Workspace:
     try:
-        return _services(request).workspaces.restore(workspace_id, payload.version)
+        result = _services(request).workspaces.restore(workspace_id, payload.version)
+        return cast(Workspace, result)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except (RuntimeError, ValueError) as exc:
