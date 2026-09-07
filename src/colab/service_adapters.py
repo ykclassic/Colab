@@ -1,11 +1,26 @@
 """Adapters that expose the existing in-memory service contracts over PostgreSQL."""
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
 from uuid import UUID
+
+from psycopg import Connection, connect
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
 from .productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
+
+
+def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[Any]]:
+    """Use Psycopg's tuple-row default so the store readiness query is scalar-safe."""
+    if not dsn.strip():
+        raise ValueError("dsn must not be empty")
+
+    def factory() -> Connection[Any]:
+        return connect(dsn)
+
+    return factory
 
 
 class PostgresWorkspaceManager:
