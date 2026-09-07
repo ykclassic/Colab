@@ -1,4 +1,4 @@
-export const API = process.env.NEXT_PUBLIC_COLAB_API_URL ?? 'http://localhost:8000';
+export const API = process.env.NEXT_PUBLIC_COLAB_API_URL ?? '/backend';
 
 export type Workspace = { workspace_id: string; name: string; product_goal: string; status: string; priority: number; strategies: unknown[] };
 export type Metrics = { pending: number; running: number; succeeded: number; failed: number; retries: number };
