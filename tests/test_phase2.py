@@ -56,7 +56,7 @@ def test_backtest_is_reproducible_and_has_no_lookahead_execution() -> None:
 
 
 def test_walk_forward_produces_chronological_oos_windows() -> None:
-    prices = [float(100 + index) for index in range(12)]
+    prices = [float(100 + index) for index in range(16)]
 
     def always_long(history: list[float] | tuple[float, ...]) -> list[int]:
         return [1] * len(history)
