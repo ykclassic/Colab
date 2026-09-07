@@ -1,23 +1,17 @@
 """Structural contracts shared by local and PostgreSQL service implementations."""
 from __future__ import annotations
 
-from typing import Protocol
+from typing import List, Protocol
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
-from .productization import (
-    ArtifactRecord,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    Workspace,
-)
+from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
 
 
 class WorkspaceService(Protocol):
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace: ...
     def get(self, workspace_id: UUID) -> Workspace: ...
-    def list(self, include_archived: bool = False) -> list[Workspace]: ...
+    def list(self, include_archived: bool = False) -> List[Workspace]: ...
     def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace: ...
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
     def restore(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
