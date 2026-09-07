@@ -26,8 +26,20 @@ class FakeStore:
         )
         self.document = KnowledgeDocument(title="doc", text="text", source="test")
         self.tool = ToolDefinition(name="tool", description="test")
-        self.job = ExecutionJob(workflow_id=uuid4(), workspace_id=self.workspace.workspace_id, stage="research", idempotency_key="key")
-        self.event = OperationalEvent(workflow_id=self.job.workflow_id, workspace_id=self.job.workspace_id, job_id=self.job.job_id, event_type="test")
+        self.job = ExecutionJob(
+            workflow_id=uuid4(),
+            workspace_id=self.workspace.workspace_id,
+            stage="research",
+            idempotency_key="key",
+        )
+        self.event = OperationalEvent(
+            workflow_id=self.job.workflow_id,
+            workspace_id=self.job.workspace_id,
+            job_id=self.job.job_id,
+            event_type="test",
+            actor="test",
+            message="ok",
+        )
 
     def submit_workspace(self, workspace): return workspace
     def get_workspace(self, workspace_id): return self.workspace
