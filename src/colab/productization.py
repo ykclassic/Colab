@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any, List, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,7 +21,6 @@ class WorkspaceStatus(str):
 
 class StrategySpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     strategy_id: UUID = Field(default_factory=uuid4)
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=5000)
@@ -31,7 +30,6 @@ class StrategySpec(BaseModel):
 
 class Workspace(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     workspace_id: UUID = Field(default_factory=uuid4)
     name: str = Field(min_length=1, max_length=200)
     product_goal: str = Field(min_length=1, max_length=10000)
@@ -47,7 +45,6 @@ class Workspace(BaseModel):
 
 class ArtifactRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     artifact_id: UUID = Field(default_factory=uuid4)
     workspace_id: UUID
     kind: str = Field(min_length=1, max_length=100)
@@ -60,7 +57,6 @@ class ArtifactRecord(BaseModel):
 
 class KnowledgeDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     document_id: UUID = Field(default_factory=uuid4)
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
@@ -72,7 +68,6 @@ class KnowledgeDocument(BaseModel):
 
 class ToolDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     description: str = Field(min_length=1, max_length=1000)
     allowed: bool = True
@@ -81,26 +76,21 @@ class ToolDefinition(BaseModel):
 
 
 class ArtifactStore(Protocol):
-    """Persistence contract for immutable artifact versions."""
-
     def put(self, artifact: ArtifactRecord) -> ArtifactRecord: ...
     def list(self, workspace_id: UUID) -> list[ArtifactRecord]: ...
 
 
 @dataclass
 class InMemoryArtifactStore:
-    """Deterministic store used by tests and local development."""
-
     records: dict[UUID, list[ArtifactRecord]] = field(default_factory=dict)
 
     def put(self, artifact: ArtifactRecord) -> ArtifactRecord:
         versions = self.records.setdefault(artifact.workspace_id, [])
         if any(item.content_hash == artifact.content_hash and item.kind == artifact.kind for item in versions):
             return next(item for item in versions if item.content_hash == artifact.content_hash and item.kind == artifact.kind)
-        if versions:
-            same_kind = [item for item in versions if item.kind == artifact.kind]
-            if same_kind:
-                artifact.version = max(item.version for item in same_kind) + 1
+        same_kind = [item for item in versions if item.kind == artifact.kind]
+        if same_kind:
+            artifact.version = max(item.version for item in same_kind) + 1
         versions.append(artifact)
         return artifact
 
@@ -109,8 +99,6 @@ class InMemoryArtifactStore:
 
 
 class KnowledgeBase:
-    """Versioned, provider-neutral lexical knowledge index."""
-
     def __init__(self) -> None:
         self._documents: dict[UUID, KnowledgeDocument] = {}
 
@@ -138,8 +126,6 @@ class KnowledgeBase:
 
 
 class ToolRegistry:
-    """Allow-list registry for platform tools."""
-
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
@@ -160,8 +146,6 @@ class ToolRegistry:
 
 
 class WorkspaceManager:
-    """Bounded concurrent workspace scheduler with lifecycle management."""
-
     def __init__(self, max_concurrent: int = 2) -> None:
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be positive")
@@ -185,10 +169,8 @@ class WorkspaceManager:
         except KeyError as exc:
             raise KeyError(str(workspace_id)) from exc
 
-    def list(self, include_archived: bool = False) -> list[Workspace]:
-        items = self._workspaces.values() if include_archived else (
-            item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED
-        )
+    def list(self, include_archived: bool = False) -> List[Workspace]:
+        items = self._workspaces.values() if include_archived else (item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED)
         return sorted(items, key=lambda item: (-item.priority, item.created_at))
 
     def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
@@ -196,10 +178,7 @@ class WorkspaceManager:
         self._check_version(workspace, expected_version)
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise ValueError("archived workspace cannot be edited")
-        workspace.name = name
-        workspace.product_goal = product_goal
-        workspace.priority = priority
-        workspace.strategies = strategies
+        workspace.name, workspace.product_goal, workspace.priority, workspace.strategies = name, product_goal, priority, strategies
         workspace.version += 1
         workspace.updated_at = datetime.now(UTC)
         self._schedule()
@@ -244,16 +223,13 @@ class WorkspaceManager:
             raise RuntimeError(f"workspace version conflict: expected {expected_version}, current {workspace.version}")
 
     def _schedule(self) -> None:
-        running = sorted(
-            (item for item in self._workspaces.values() if item.status == WorkspaceStatus.RUNNING),
-            key=lambda item: (item.priority, item.created_at),
-        )
+        running = sorted((item for item in self._workspaces.values() if item.status == WorkspaceStatus.RUNNING), key=lambda item: (item.priority, item.created_at))
         queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
         slots = max(0, self.max_concurrent - len(running))
         if running and queued:
             highest_queued = queued[0]
             lower_running = [item for item in running if item.priority < highest_queued.priority]
-            for workspace in lower_running[: max(0, min(len(queued), len(lower_running)))]:
+            for workspace in lower_running[: min(len(queued), len(lower_running))]:
                 workspace.status = WorkspaceStatus.QUEUED
                 workspace.updated_at = datetime.now(UTC)
             running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
@@ -264,12 +240,5 @@ class WorkspaceManager:
 
 
 def build_artifact(workspace_id: UUID, kind: str, producer: str, content: dict[str, Any]) -> ArtifactRecord:
-    """Create a content-addressed artifact; versions are assigned by the store."""
     canonical = repr(sorted(content.items())).encode("utf-8")
-    return ArtifactRecord(
-        workspace_id=workspace_id,
-        kind=kind,
-        producer=producer,
-        content=content,
-        content_hash=sha256(canonical).hexdigest(),
-    )
+    return ArtifactRecord(workspace_id=workspace_id, kind=kind, producer=producer, content=content, content_hash=sha256(canonical).hexdigest())
