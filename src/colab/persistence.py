@@ -82,9 +82,15 @@ class PostgresWorkflowRepository:
                     f"workflow {state.workflow_id} changed since version {expected_version}"
                 )
             cur.execute("SELECT count(*) FROM public.workflow_decisions WHERE workflow_id=%s", (state.workflow_id,))
-            decision_offset = int(cur.fetchone()[0])
+            decision_row = cur.fetchone()
+            if decision_row is None:
+                raise PersistenceError("failed to read decision offset")
+            decision_offset = int(decision_row[0])
             cur.execute("SELECT count(*) FROM public.workflow_approvals WHERE workflow_id=%s", (state.workflow_id,))
-            approval_offset = int(cur.fetchone()[0])
+            approval_row = cur.fetchone()
+            if approval_row is None:
+                raise PersistenceError("failed to read approval offset")
+            approval_offset = int(approval_row[0])
             self._write_children(cur, state, decision_offset, approval_offset)
             self._write_checkpoint(cur, state, new_version, payload)
         return new_version
@@ -104,14 +110,18 @@ class PostgresWorkflowRepository:
                   stage=EXCLUDED.stage, status=EXCLUDED.status""",
                 (task.task_id, state.workflow_id, task.role.value, task.objective, task.stage.value, task.status),
             )
-        collections = (("research", state.research_artifacts), ("strategy", state.strategy_candidates),
-                       ("implementation", state.implementation_artifacts), ("validation", state.validation_results))
-        for collection, artifacts in collections:
+        for collection, artifacts in (
+            ("research", state.research_artifacts),
+            ("strategy", state.strategy_candidates),
+            ("implementation", state.implementation_artifacts),
+            ("validation", state.validation_results),
+        ):
             for artifact in artifacts:
                 cur.execute(
                     """INSERT INTO public.artifacts
                     (artifact_id,workflow_id,collection,kind,version,producer,content)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (artifact_id) DO NOTHING""",
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (artifact_id) DO NOTHING""",
                     (artifact.artifact_id, state.workflow_id, collection, artifact.kind, artifact.version,
                      artifact.producer.value, artifact.content),
                 )
@@ -119,62 +129,66 @@ class PostgresWorkflowRepository:
             cur.execute(
                 """INSERT INTO public.risk_assessments
                 (assessment_id,workflow_id,decision,findings,controls,assessor)
-                VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (assessment_id) DO NOTHING""",
+                VALUES (%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (assessment_id) DO NOTHING""",
                 (assessment.assessment_id, state.workflow_id, assessment.decision.value,
                  assessment.findings, assessment.controls, assessment.assessor.value),
             )
         for decision in state.decisions[decision_offset:]:
             cur.execute("INSERT INTO public.workflow_decisions (workflow_id,decision) VALUES (%s,%s)",
-                        (state.workflow_id, decision))
+                        (state.workflow_id, decision.model_dump(mode="json")))
         for approval in state.approvals[approval_offset:]:
             cur.execute("INSERT INTO public.workflow_approvals (workflow_id,approval) VALUES (%s,%s)",
-                        (state.workflow_id, approval))
+                        (state.workflow_id, approval.model_dump(mode="json")))
         for event in state.audit_events:
             cur.execute(
                 """INSERT INTO public.audit_events
                 (event_id,workflow_id,event_type,stage,actor,message,at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (event_id) DO NOTHING""",
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (event_id) DO NOTHING""",
                 (event.event_id, state.workflow_id, event.event_type, event.stage.value,
-                 str(event.actor), event.message, event.at),
+                 event.actor.value, event.message, event.at),
             )
 
     @staticmethod
     def _load_state(cur: Any, workflow: dict[str, Any]) -> WorkflowState:
         workflow_id = workflow["workflow_id"]
         cur.execute("SELECT * FROM public.agent_tasks WHERE workflow_id=%s ORDER BY created_at", (workflow_id,))
-        tasks = [AgentTask(task_id=r["task_id"], role=r["role"], objective=r["objective"], stage=r["stage"], status=r["status"])
-                 for r in cur.fetchall()]
+        tasks = [AgentTask.model_validate(row) for row in cur.fetchall()]
         cur.execute("SELECT * FROM public.artifacts WHERE workflow_id=%s ORDER BY created_at", (workflow_id,))
-        rows = cur.fetchall()
-        artifacts = [Artifact(artifact_id=r["artifact_id"], kind=r["kind"], version=r["version"], producer=r["producer"],
-                              content=r["content"], created_at=r["created_at"]) for r in rows]
-        by_collection: dict[str, list[Artifact]] = {"research": [], "strategy": [], "implementation": [], "validation": []}
-        for artifact, row in zip(artifacts, rows, strict=True):
-            by_collection[str(row["collection"])].append(artifact)
+        artifacts = cur.fetchall()
         cur.execute("SELECT * FROM public.risk_assessments WHERE workflow_id=%s ORDER BY created_at", (workflow_id,))
-        risks = [RiskAssessment(assessment_id=r["assessment_id"], decision=r["decision"], findings=r["findings"],
-                                controls=r["controls"], assessor=r["assessor"]) for r in cur.fetchall()]
+        risks = [RiskAssessment.model_validate(row) for row in cur.fetchall()]
         cur.execute("SELECT * FROM public.audit_events WHERE workflow_id=%s ORDER BY at", (workflow_id,))
-        events = [AuditEvent(event_id=r["event_id"], event_type=r["event_type"], stage=r["stage"], actor=r["actor"],
-                             message=r["message"], at=r["at"]) for r in cur.fetchall()]
-        cur.execute("SELECT decision FROM public.workflow_decisions WHERE workflow_id=%s ORDER BY created_at", (workflow_id,))
-        decisions = [r["decision"] for r in cur.fetchall()]
-        cur.execute("SELECT approval FROM public.workflow_approvals WHERE workflow_id=%s ORDER BY created_at", (workflow_id,))
-        approvals = [r["approval"] for r in cur.fetchall()]
-        return WorkflowState(workflow_id=workflow_id, schema_version=workflow["schema_version"], product_goal=workflow["product_goal"],
-            product_brief=workflow["product_brief"], roadmap=workflow["roadmap"], current_stage=workflow["current_stage"],
-            agent_tasks=tasks, research_artifacts=by_collection["research"], strategy_candidates=by_collection["strategy"],
-            risk_assessments=risks, implementation_artifacts=by_collection["implementation"], validation_results=by_collection["validation"],
-            decisions=decisions, approvals=approvals, audit_events=events, iteration_count=workflow["iteration_count"],
-            budgets=workflow["budgets"], final_package=workflow["final_package"])
+        events = [AuditEvent.model_validate(row) for row in cur.fetchall()]
+        return WorkflowState(
+            workflow_id=workflow_id,
+            schema_version=workflow["schema_version"],
+            product_goal=workflow["product_goal"],
+            product_brief=workflow["product_brief"],
+            roadmap=workflow["roadmap"],
+            current_stage=workflow["current_stage"],
+            agent_tasks=tasks,
+            research_artifacts=[Artifact.model_validate(row) for row in artifacts if row["collection"] == "research"],
+            strategy_candidates=[Artifact.model_validate(row) for row in artifacts if row["collection"] == "strategy"],
+            implementation_artifacts=[Artifact.model_validate(row) for row in artifacts if row["collection"] == "implementation"],
+            validation_results=[Artifact.model_validate(row) for row in artifacts if row["collection"] == "validation"],
+            risk_assessments=risks,
+            iteration_count=workflow["iteration_count"],
+            budgets=workflow["budgets"],
+            final_package=workflow["final_package"],
+            audit_events=events,
+        )
 
 
 def connection_factory_from_dsn(dsn: str) -> ConnectionFactory:
-    """Create a connection factory from a secret DSN without persisting the DSN."""
+    """Build a PostgreSQL connection factory from a secure DSN."""
     if not dsn.strip():
-        raise ValueError("database DSN must not be empty")
+        raise ValueError("dsn must not be empty")
 
     def factory() -> Connection[Any]:
-        return Connection.connect(dsn, row_factory=dict_row)
+        from psycopg import connect
+
+        return connect(dsn, row_factory=dict_row)
 
     return factory
