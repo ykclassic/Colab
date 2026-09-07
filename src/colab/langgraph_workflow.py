@@ -56,6 +56,15 @@ def _approval_gate(state: GraphState) -> GraphState:
     return {"workflow": _encode(workflow)}
 
 
+def _route_after_advance(state: GraphState) -> str:
+    stage = state["workflow"]["current_stage"]
+    if stage == Stage.HUMAN_REVIEW.value:
+        return "human_approval"
+    if stage in {Stage.COMPLETE.value, Stage.REJECTED.value}:
+        return END
+    return "advance"
+
+
 def build_workflow_graph(checkpointer: Any | None = None) -> Any:
     """Build the production workflow graph with a pluggable checkpointer."""
     builder = StateGraph(GraphState)
@@ -64,8 +73,8 @@ def build_workflow_graph(checkpointer: Any | None = None) -> Any:
     builder.add_edge(START, "advance")
     builder.add_conditional_edges(
         "advance",
-        lambda state: "human_approval" if state["workflow"]["current_stage"] == Stage.HUMAN_REVIEW.value else END,
-        {"human_approval": "human_approval", END: END},
+        _route_after_advance,
+        {"human_approval": "human_approval", "advance": "advance", END: END},
     )
     builder.add_edge("human_approval", END)
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
