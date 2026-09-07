@@ -8,8 +8,8 @@ from colab.operations import (
     ExecutionCoordinator,
     ExecutionStatus,
     MetricsSnapshot,
-    OperationalEvent,
     ObservabilityRecorder,
+    OperationalEvent,
 )
 
 
