@@ -2,7 +2,9 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
+from colab.api import PlatformServices, create_app
 from colab.operations import (
     EventLevel,
     ExecutionCoordinator,
@@ -43,6 +45,7 @@ def test_lease_ownership_heartbeat_complete_and_cancel() -> None:
     coordinator = ExecutionCoordinator(lease_seconds=30, clock=clock)
     workflow_id, workspace_id = uuid4(), uuid4()
     job = coordinator.enqueue(workflow_id, workspace_id, "validation", "key-1")
+    assert coordinator.claim("worker-a") == job
 
     with pytest.raises(PermissionError):
         coordinator.complete(job.job_id, "other")
@@ -121,3 +124,41 @@ def test_validation_of_operational_limits() -> None:
     with pytest.raises(ValueError):
         ObservabilityRecorder(max_events=0)
     assert MetricsSnapshot().pending == 0
+
+
+def test_api_execution_lifecycle_and_events() -> None:
+    services = PlatformServices()
+    client = TestClient(create_app(services))
+    workflow_id, workspace_id = uuid4(), uuid4()
+    payload = {
+        "workflow_id": str(workflow_id),
+        "workspace_id": str(workspace_id),
+        "stage": "research",
+        "idempotency_key": "api-key",
+    }
+
+    created = client.post("/api/executions", json=payload)
+    assert created.status_code == 201
+    job = created.json()
+    duplicate = client.post("/api/executions", json=payload)
+    assert duplicate.status_code == 201
+    assert duplicate.json()["job_id"] == job["job_id"]
+
+    assert client.get("/api/operations/metrics").json()["pending"] == 1
+    claimed = client.post("/api/executions/claim", json={"worker_id": "worker-a"})
+    assert claimed.status_code == 200
+    job_id = claimed.json()["job_id"]
+    assert client.post(
+        f"/api/executions/{job_id}/heartbeat", json={"worker_id": "worker-a"}
+    ).status_code == 200
+    assert client.post(
+        f"/api/executions/{job_id}/complete", json={"worker_id": "worker-a"}
+    ).json()["status"] == "succeeded"
+
+    metrics = client.get("/api/operations/metrics").json()
+    assert metrics["succeeded"] == 1
+    events = client.get(f"/api/operations/events?job_id={job_id}").json()
+    assert {event["event_type"] for event in events} >= {"execution_enqueued", "execution_claimed", "execution_succeeded"}
+
+    assert client.post("/api/executions/claim", json={"worker_id": "worker-a"}).status_code == 409
+    assert client.post("/api/executions/not-a-uuid/cancel").status_code == 422
