@@ -9,7 +9,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
+from .operations import (
+    EventLevel,
+    ExecutionCoordinator,
+    ExecutionJob,
+    MetricsSnapshot,
+    ObservabilityRecorder,
+    OperationalEvent,
+)
 from .productization import (
     ArtifactRecord,
     InMemoryArtifactStore,
