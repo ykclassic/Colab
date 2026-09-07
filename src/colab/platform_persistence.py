@@ -50,7 +50,10 @@ class PlatformRepository:
                    WHERE workspace_id=%s AND kind=%s""",
                 (artifact.workspace_id, artifact.kind),
             )
-            version = int(cur.fetchone()["version"]) + 1
+            row = cur.fetchone()
+            if row is None:
+                raise RuntimeError("artifact version query returned no row")
+            version = int(row["version"]) + 1
             artifact.version = version
             cur.execute(
                 """INSERT INTO public.product_artifacts
@@ -79,7 +82,10 @@ class PlatformRepository:
                 (document.document_id, document.title, document.text, document.source, document.tags,
                  document.version, document.created_at),
             )
-            document.version = int(cur.fetchone()["version"])
+            row = cur.fetchone()
+            if row is None:
+                raise RuntimeError("knowledge upsert returned no version")
+            document.version = int(row["version"])
         return document
 
     def register_tool(self, tool: ToolDefinition) -> ToolDefinition:
