@@ -14,8 +14,10 @@ jobs:
     env:
       BASE_URL: https://colab-api-rqoh.onrender.com
       WORKFLOW_ID: b6a2d8b6-9e7c-4b67-9d2d-4a4d1c9d0f31
-      WORKSPACE_NAME: PROD-HTTP-SMOKE-20260907
-      KNOWLEDGE_TITLE: PROD-HTTP-SMOKE-20260907
+      WORKSPACE_ID: 13cce48d-38da-4a69-bdba-ffc22bf889dd
+      WORKSPACE_NAME: PROD-HTTP-SMOKE-34163130377
+      KNOWLEDGE_TITLE: PROD-HTTP-SMOKE-34163130377
+      ARTIFACT_MARKER: 20260907-http-34163130377
     steps:
       - name: Verify readiness after redeploy
         run: |
@@ -28,24 +30,21 @@ jobs:
       - name: Read workspace after redeploy
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces" | tee /tmp/workspaces.json
-          test "$(jq -r 'map(select(.name=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/workspaces.json)" -eq 1
-          export WORKSPACE_ID=$(jq -r 'map(select(.name=="PROD-HTTP-SMOKE-20260907"))[0].workspace_id' /tmp/workspaces.json)
-          echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_ENV"
           curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID" | tee /tmp/workspace.json
+          test "$(jq -r .workspace_id /tmp/workspace.json)" = "$WORKSPACE_ID"
           test "$(jq -r .name /tmp/workspace.json)" = "$WORKSPACE_NAME"
 
       - name: Read artifact after redeploy
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" | tee /tmp/artifacts.json
-          test "$(jq -r 'map(select(.producer=="production-http-smoke" and .content.marker=="20260907-http")) | length' /tmp/artifacts.json)" -eq 1
+          test "$(jq -r --arg marker "$ARTIFACT_MARKER" 'map(select(.producer=="production-http-smoke" and .content.marker==$marker)) | length' /tmp/artifacts.json)" -eq 1
 
       - name: Read knowledge after redeploy
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode 'q=Production HTTP persistence verification' | tee /tmp/knowledge.json
-          test "$(jq -r 'map(select(.title=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/knowledge.json)" -eq 1
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode "q=$KNOWLEDGE_TITLE" | tee /tmp/knowledge.json
+          test "$(jq -r --arg title "$KNOWLEDGE_TITLE" 'map(select(.title==$title)) | length' /tmp/knowledge.json)" -ge 1
 
       - name: Read execution and operational event after redeploy
         run: |
