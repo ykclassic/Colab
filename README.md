@@ -1,6 +1,6 @@
 # Colab — Multi-Agent Collaboration Platform
 
-Production-grade foundation for a multi-agent AI executive team that turns product goals into research, strategy, risk review, implementation, validation, and a human-reviewed final package.
+Production-grade multi-agent collaboration platform for quantitative product development.
 
 ## Architecture
 
@@ -12,18 +12,36 @@ Production-grade foundation for a multi-agent AI executive team that turns produ
 
 The platform uses structured, versioned workflow state and explicit stage transitions. Risk review is independent from strategy generation. Critical outputs require human approval.
 
-## Safety boundary
+## Phase 3 — Platform Productization
 
-This platform is for research and product development. It does **not** contain a live trading/exchange execution path.
+Phase 3 adds:
 
-## Initial implementation
-
-Phase 1 establishes the repository, application package, typed workflow contracts, deterministic orchestration core, audit events, and tests. Model/provider integrations are deliberately isolated behind interfaces so the deterministic workflow remains testable and reproducible.
+- FastAPI web/API interface with a responsive dashboard.
+- Product workspaces with bounded concurrency and priority scheduling.
+- Versioned, content-addressed artifact management with deterministic de-duplication.
+- Provider-neutral tool registry with an explicit allow-list; no live trading/execution tool is registered.
+- Versioned knowledge documents with deterministic lexical search and an interface suitable for a future vector backend.
+- PostgreSQL schema for durable workspace, artifact, knowledge, and tool metadata with RLS enabled and browser roles denied until identity-aware policies exist.
 
 ## Development
 
 Python 3.12+
 
 ```bash
-python -m pytest -q
+python -m pip install -e '.[dev]'
+pytest --cov=colab --cov-report=term-missing --cov-fail-under=90
 ```
+
+Run the web interface locally with:
+
+```bash
+uvicorn colab.api:app --reload
+```
+
+The dashboard is served at `/`, the API under `/api`, and `/health` is suitable for deployment health checks.
+
+## Safety boundary
+
+This platform is for research and product development. It does **not** contain a live trading/exchange execution path. Quantitative execution remains subject to the Phase 2 orchestration, independent risk policy, validation, and human-review gates. The quantitative sandbox is a trusted-code boundary, not a hostile-tenant isolation boundary.
+
+For production persistence, use the platform repository with `COLAB_DATABASE_DSN` and apply the Supabase migrations. Browser/API authorization must be added before exposing persisted records to authenticated tenants.
