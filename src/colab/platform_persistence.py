@@ -8,6 +8,7 @@ from uuid import UUID
 
 from psycopg import Connection
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from .productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
 
@@ -32,7 +33,7 @@ class PlatformRepository:
                 (workspace_id,name,product_goal,status,priority,strategies,created_at,updated_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (workspace.workspace_id, workspace.name, workspace.product_goal, workspace.status,
-                 workspace.priority, [item.model_dump(mode="json") for item in workspace.strategies],
+                 workspace.priority, Jsonb([item.model_dump(mode="json") for item in workspace.strategies]),
                  workspace.created_at, workspace.updated_at),
             )
         return workspace
@@ -56,7 +57,7 @@ class PlatformRepository:
                 (artifact_id,workspace_id,kind,version,producer,content,content_hash,created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (artifact.artifact_id, artifact.workspace_id, artifact.kind, artifact.version,
-                 artifact.producer, artifact.content, artifact.content_hash, artifact.created_at),
+                 artifact.producer, Jsonb(artifact.content), artifact.content_hash, artifact.created_at),
             )
         return artifact
 
@@ -67,16 +68,18 @@ class PlatformRepository:
             return [ArtifactRecord.model_validate(row) for row in cur.fetchall()]
 
     def upsert_knowledge(self, document: KnowledgeDocument) -> KnowledgeDocument:
-        with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
+        with self._connection() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """INSERT INTO public.knowledge_documents
                 (document_id,title,text,source,tags,version,created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (document_id) DO UPDATE SET title=EXCLUDED.title,text=EXCLUDED.text,
-                source=EXCLUDED.source,tags=EXCLUDED.tags,version=public.knowledge_documents.version+1""",
+                source=EXCLUDED.source,tags=EXCLUDED.tags,version=public.knowledge_documents.version+1
+                RETURNING version""",
                 (document.document_id, document.title, document.text, document.source, document.tags,
                  document.version, document.created_at),
             )
+            document.version = int(cur.fetchone()["version"])
         return document
 
     def register_tool(self, tool: ToolDefinition) -> ToolDefinition:
@@ -87,7 +90,7 @@ class PlatformRepository:
                 VALUES (%s,%s,%s,%s,%s)
                 ON CONFLICT (name) DO UPDATE SET description=EXCLUDED.description,
                 allowed=EXCLUDED.allowed,input_schema=EXCLUDED.input_schema,output_schema=EXCLUDED.output_schema""",
-                (tool.name, tool.description, tool.allowed, tool.input_schema, tool.output_schema),
+                (tool.name, tool.description, tool.allowed, Jsonb(tool.input_schema), Jsonb(tool.output_schema)),
             )
         return tool
 
