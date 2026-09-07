@@ -43,3 +43,63 @@ jobs:
         run: npm install
       - name: Build
         run: npm run build
+
+  production-http-smoke:
+    if: startsWith(github.ref, 'refs/heads/chore/prod-http-smoke-20260907')
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://colab-api-rqoh.onrender.com
+      WORKFLOW_ID: b6a2d8b6-9e7c-4b67-9d2d-4a4d1c9d0f31
+      WORKSPACE_NAME: PROD-HTTP-SMOKE-20260907
+      KNOWLEDGE_TITLE: PROD-HTTP-SMOKE-20260907
+    steps:
+      - name: Verify readiness
+        run: |
+          set -euo pipefail
+          body=$(curl --fail-with-body --silent --show-error --retry 5 --retry-delay 2 "$BASE_URL/ready")
+          echo "$body"
+          test "$(jq -r .status <<<"$body")" = ready
+          test "$(jq -r .database <<<"$body")" = ok
+
+      - name: Create workspace and read it
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg n "$WORKSPACE_NAME" '{name:$n,product_goal:"Production HTTP persistence smoke verification"}')
+          curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/workspaces" -H 'content-type: application/json' -d "$payload" | tee /tmp/workspace.json
+          test "$(jq -r .name /tmp/workspace.json)" = "$WORKSPACE_NAME"
+          export WORKSPACE_ID=$(jq -r .workspace_id /tmp/workspace.json)
+          echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_ENV"
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID" | tee /tmp/workspace-read.json
+          test "$(jq -r .workspace_id /tmp/workspace-read.json)" = "$WORKSPACE_ID"
+
+      - name: Create and read artifact
+        run: |
+          set -euo pipefail
+          payload='{"kind":"verification","producer":"production-http-smoke","content":{"marker":"20260907-http","durability":true}}'
+          curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" -H 'content-type: application/json' -d "$payload" | tee /tmp/artifact-create.json
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" | tee /tmp/artifacts-read.json
+          test "$(jq -r 'map(select(.producer=="production-http-smoke" and .content.marker=="20260907-http")) | length' /tmp/artifacts-read.json)" -eq 1
+
+      - name: Create and read knowledge
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg t "$KNOWLEDGE_TITLE" '{title:$t,text:"Production HTTP persistence verification knowledge document",source:"production-http-smoke",tags:["verification","20260907"]}')
+          curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/knowledge" -H 'content-type: application/json' -d "$payload" | tee /tmp/knowledge-create.json
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode 'q=Production HTTP persistence verification' | tee /tmp/knowledge-read.json
+          test "$(jq -r 'map(select(.title=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/knowledge-read.json)" -eq 1
+
+      - name: Create execution and verify operational event
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg w "$WORKFLOW_ID" --arg x "$WORKSPACE_ID" '{workflow_id:$w,workspace_id:$x,stage:"validation",idempotency_key:"prod-http-smoke-20260907",max_attempts:3}')
+          curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/executions" -H 'content-type: application/json' -d "$payload" | tee /tmp/execution-create.json
+          test "$(jq -r .workflow_id /tmp/execution-create.json)" = "$WORKFLOW_ID"
+          test "$(jq -r .workspace_id /tmp/execution-create.json)" = "$WORKSPACE_ID"
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/operations/events" --data-urlencode "workflow_id=$WORKFLOW_ID" --data-urlencode "workspace_id=$WORKSPACE_ID" | tee /tmp/events-read.json
+          test "$(jq -r 'map(select(.event_type=="execution_enqueued")) | length' /tmp/events-read.json)" -ge 1
+
+      - name: Summary
+        run: |
+          echo 'PRODUCTION HTTP CREATE/READ SMOKE: PASS'
+          echo "Workspace: $WORKSPACE_ID"
+          echo "Workflow: $WORKFLOW_ID"
