@@ -63,16 +63,15 @@ def run_backtest(
     equity = initial_capital
     curve = [equity]
     trades = 0
-    previous_signal = 0
     cost = transaction_cost_bps / 10_000.0
     for index in range(1, len(prices)):
-        signal = signals[index - 1]
-        if signal != previous_signal:
+        held_signal = signals[index - 1]
+        signal = signals[index]
+        if signal != held_signal:
             trades += 1
             equity *= 1.0 - cost
-            previous_signal = signal
         period_return = (prices[index] / prices[index - 1]) - 1.0
-        equity *= 1.0 + signal * period_return
+        equity *= 1.0 + held_signal * period_return
         curve.append(equity)
 
     peak = curve[0]
@@ -119,7 +118,7 @@ def walk_forward_validate(
     _validate_prices(prices)
     if train_size < 1 or test_size < 1:
         raise ValueError("train_size and test_size must be positive")
-    step = test_size if step is None else step
+    step = train_size + test_size if step is None else step
     if step < 1:
         raise ValueError("step must be positive")
 
