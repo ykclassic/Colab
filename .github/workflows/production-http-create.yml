@@ -14,8 +14,6 @@ jobs:
     env:
       BASE_URL: https://colab-api-rqoh.onrender.com
       WORKFLOW_ID: b6a2d8b6-9e7c-4b67-9d2d-4a4d1c9d0f31
-      WORKSPACE_NAME: PROD-HTTP-SMOKE-20260907
-      KNOWLEDGE_TITLE: PROD-HTTP-SMOKE-20260907
     steps:
       - name: Verify readiness
         run: |
@@ -28,6 +26,8 @@ jobs:
       - name: Create workspace
         run: |
           set -euo pipefail
+          WORKSPACE_NAME="PROD-HTTP-SMOKE-${GITHUB_RUN_ID}"
+          echo "WORKSPACE_NAME=$WORKSPACE_NAME" >> "$GITHUB_ENV"
           payload=$(jq -n --arg n "$WORKSPACE_NAME" '{name:$n,product_goal:"Production HTTP persistence smoke verification"}')
           curl --fail-with-body --silent --show-error --retry 3 -X POST "$BASE_URL/api/workspaces" -H 'content-type: application/json' -d "$payload" | tee /tmp/workspace.json
           test "$(jq -r .name /tmp/workspace.json)" = "$WORKSPACE_NAME"
@@ -43,24 +43,26 @@ jobs:
       - name: Create and read artifact
         run: |
           set -euo pipefail
-          payload='{"kind":"verification","producer":"production-http-smoke","content":{"marker":"20260907-http","durability":true}}'
+          payload=$(jq -n --arg marker "20260907-http-$GITHUB_RUN_ID" '{kind:"verification",producer:"production-http-smoke",content:{marker:$marker,durability:true}}')
           curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" -H 'content-type: application/json' -d "$payload" | tee /tmp/artifact-create.json
           curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" | tee /tmp/artifacts-read.json
           test "$(jq -r 'length' /tmp/artifacts-read.json)" -ge 1
-          test "$(jq -r 'map(select(.producer=="production-http-smoke" and .content.marker=="20260907-http")) | length' /tmp/artifacts-read.json)" -eq 1
+          test "$(jq -r --arg marker "20260907-http-$GITHUB_RUN_ID" 'map(select(.producer=="production-http-smoke" and .content.marker==$marker)) | length' /tmp/artifacts-read.json)" -eq 1
 
       - name: Create and read knowledge
         run: |
           set -euo pipefail
+          KNOWLEDGE_TITLE="PROD-HTTP-SMOKE-${GITHUB_RUN_ID}"
           payload=$(jq -n --arg t "$KNOWLEDGE_TITLE" '{title:$t,text:"Production HTTP persistence verification knowledge document",source:"production-http-smoke",tags:["verification","20260907"]}')
           curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/knowledge" -H 'content-type: application/json' -d "$payload" | tee /tmp/knowledge-create.json
-          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode 'q=Production HTTP persistence verification' | tee /tmp/knowledge-read.json
-          test "$(jq -r 'map(select(.title=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/knowledge-read.json)" -eq 1
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode "q=$KNOWLEDGE_TITLE" | tee /tmp/knowledge-read.json
+          test "$(jq -r --arg title "$KNOWLEDGE_TITLE" 'map(select(.title==$title)) | length' /tmp/knowledge-read.json)" -ge 1
 
       - name: Create execution and verify operational event
         run: |
           set -euo pipefail
-          payload=$(jq -n --arg w "$WORKFLOW_ID" --arg x "$WORKSPACE_ID" '{workflow_id:$w,workspace_id:$x,stage:"validation",idempotency_key:"prod-http-smoke-20260907",max_attempts:3}')
+          IDEMPOTENCY_KEY="prod-http-smoke-$GITHUB_RUN_ID"
+          payload=$(jq -n --arg w "$WORKFLOW_ID" --arg x "$WORKSPACE_ID" --arg i "$IDEMPOTENCY_KEY" '{workflow_id:$w,workspace_id:$x,stage:"validation",idempotency_key:$i,max_attempts:3}')
           curl --fail-with-body --silent --show-error -X POST "$BASE_URL/api/executions" -H 'content-type: application/json' -d "$payload" | tee /tmp/execution-create.json
           test "$(jq -r .workflow_id /tmp/execution-create.json)" = "$WORKFLOW_ID"
           test "$(jq -r .workspace_id /tmp/execution-create.json)" = "$WORKSPACE_ID"
