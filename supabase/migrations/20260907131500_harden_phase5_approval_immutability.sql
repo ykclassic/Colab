@@ -2,6 +2,7 @@
 CREATE OR REPLACE FUNCTION public.enforce_approval_transition()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
