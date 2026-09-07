@@ -139,18 +139,6 @@ def test_load_reconstructs_complete_state() -> None:
     artifact_id = uuid4()
     assessment_id = uuid4()
     event_id = uuid4()
-    workflow = {
-        "workflow_id": workflow_id,
-        "schema_version": "1.0",
-        "product_goal": "test",
-        "product_brief": {"scope": "x"},
-        "roadmap": ["one"],
-        "current_stage": "risk",
-        "iteration_count": 2,
-        "budgets": {"tokens": 100},
-        "final_package": {"done": True},
-        "version": 4,
-    }
     result_sets = [
         [
             {
