@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, List
 from uuid import UUID
 
 from psycopg import Connection
@@ -50,7 +50,7 @@ class WorkspaceLifecycleStore:
             raise KeyError(str(workspace_id))
         return Workspace.model_validate(row)
 
-    def list(self, include_archived: bool = False) -> list[Workspace]:
+    def list(self, include_archived: bool = False) -> List[Workspace]:
         sql = "SELECT * FROM public.product_workspaces"
         if not include_archived:
             sql += " WHERE status <> %s"
