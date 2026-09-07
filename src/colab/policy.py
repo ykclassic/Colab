@@ -25,7 +25,6 @@ def validate_state_for_persistence(state: WorkflowState) -> None:
 
 
 def validate_agent_separation(actor: AgentRole, risk_assessor: AgentRole) -> None:
+    """Require an independent Risk Officer for risk assessment."""
     if actor == AgentRole.RISK or risk_assessor != AgentRole.RISK:
         raise PolicyViolation("Risk assessment must be performed by the independent Risk Officer")
-    if actor == risk_assessor:
-        raise PolicyViolation("Strategy author cannot also act as risk assessor")
