@@ -1,10 +1,11 @@
 """Phase 4 operational primitives: leases, retries, idempotency, and telemetry."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -138,8 +139,9 @@ class ExecutionCoordinator:
 
     def heartbeat(self, job_id: UUID, worker_id: str) -> ExecutionJob:
         job = self._owned_running(job_id, worker_id)
-        job.lease_expires_at = self.clock() + timedelta(seconds=self.lease_seconds)
-        job.updated_at = self.clock()
+        now = self.clock()
+        job.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
+        job.updated_at = now
         return job
 
     def complete(self, job_id: UUID, worker_id: str) -> ExecutionJob:
