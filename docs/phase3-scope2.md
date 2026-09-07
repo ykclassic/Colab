@@ -1,0 +1,1 @@
+Phase 3 scope follows the design document: web interface and artifact management, expanded tools and knowledge, and support for concurrent product development and multi-strategy systems.
