@@ -5,23 +5,20 @@ from typing import Protocol
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
-from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
+from .productization import (
+    ArtifactRecord,
+    KnowledgeDocument,
+    StrategySpec,
+    ToolDefinition,
+    Workspace,
+)
 
 
 class WorkspaceService(Protocol):
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace: ...
     def get(self, workspace_id: UUID) -> Workspace: ...
     def list(self, include_archived: bool = False) -> list[Workspace]: ...
-    def update(
-        self,
-        workspace_id: UUID,
-        expected_version: int,
-        *,
-        name: str,
-        product_goal: str,
-        priority: int,
-        strategies: list[StrategySpec],
-    ) -> Workspace: ...
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace: ...
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
     def restore(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
     def delete(self, workspace_id: UUID, expected_version: int) -> None: ...
@@ -43,14 +40,7 @@ class ToolService(Protocol):
 
 
 class ExecutionService(Protocol):
-    def enqueue(
-        self,
-        workflow_id: UUID,
-        workspace_id: UUID,
-        stage: str,
-        idempotency_key: str,
-        max_attempts: int = 3,
-    ) -> ExecutionJob: ...
+    def enqueue(self, workflow_id: UUID, workspace_id: UUID, stage: str, idempotency_key: str, max_attempts: int = 3) -> ExecutionJob: ...
     def claim(self, worker_id: str) -> ExecutionJob | None: ...
     def heartbeat(self, job_id: UUID, worker_id: str) -> ExecutionJob: ...
     def complete(self, job_id: UUID, worker_id: str) -> ExecutionJob: ...
@@ -61,10 +51,4 @@ class ExecutionService(Protocol):
 
 class ObservabilityService(Protocol):
     def record(self, event: OperationalEvent) -> OperationalEvent: ...
-    def query(
-        self,
-        workflow_id: UUID | None = None,
-        workspace_id: UUID | None = None,
-        job_id: UUID | None = None,
-        limit: int = 100,
-    ) -> list[OperationalEvent]: ...
+    def query(self, workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = 100) -> list[OperationalEvent]: ...
