@@ -21,87 +21,89 @@ class BacktestResult:
     final_equity: float
     total_return: float
     max_drawdown: float
-    trade_count: int
+    trades: int
+    equity_curve: tuple[float, ...]
     reproducibility_hash: str
 
 
 @dataclass(frozen=True)
-class WalkForwardResult:
-    """Chronological walk-forward validation result."""
+class WalkForwardWindow:
+    """One chronological train/test window."""
 
-    train_windows: int
-    test_windows: int
-    out_of_sample_returns: tuple[float, ...]
-    aggregate_out_of_sample_return: float
+    train_start: int
+    train_end: int
+    test_start: int
+    test_end: int
+    result: BacktestResult
 
 
 def _validate_prices(prices: Sequence[float]) -> None:
     if len(prices) < 2:
-        raise ValueError("At least two prices are required")
+        raise ValueError("at least two prices are required")
     if any(not math.isfinite(price) or price <= 0 for price in prices):
-        raise ValueError("Prices must be finite and strictly positive")
+        raise ValueError("prices must be finite and positive")
 
 
-def _validate_signals(signals: Sequence[int], expected_length: int) -> None:
-    if len(signals) != expected_length:
-        raise ValueError("Signal length must match price length")
-    if any(signal not in (-1, 0, 1) for signal in signals):
-        raise ValueError("Signals must be -1, 0, or 1")
-
-
-def backtest(
+def run_backtest(
     prices: Sequence[float],
-    signal_fn: SignalFn,
+    signals: Sequence[int],
     *,
     initial_capital: float = 100_000.0,
     transaction_cost_bps: float = 0.0,
 ) -> BacktestResult:
-    """Run a deterministic long/flat backtest with transaction costs."""
+    """Run a long/flat, close-to-close backtest without look-ahead execution."""
     _validate_prices(prices)
-    if not math.isfinite(initial_capital) or initial_capital <= 0:
-        raise ValueError("Initial capital must be finite and positive")
-    if not math.isfinite(transaction_cost_bps) or transaction_cost_bps < 0:
-        raise ValueError("Transaction cost must be finite and non-negative")
-
-    signals = tuple(signal_fn(prices))
-    _validate_signals(signals, len(prices))
+    if len(signals) != len(prices):
+        raise ValueError("signals and prices must have equal length")
+    if initial_capital <= 0 or not math.isfinite(initial_capital):
+        raise ValueError("initial_capital must be finite and positive")
+    if transaction_cost_bps < 0 or not math.isfinite(transaction_cost_bps):
+        raise ValueError("transaction_cost_bps must be finite and non-negative")
+    if any(signal not in {-1, 0, 1} for signal in signals):
+        raise ValueError("signals must be -1, 0, or 1")
 
     equity = initial_capital
-    peak = equity
-    max_drawdown = 0.0
-    position = 0
-    trade_count = 0
-    cost_rate = transaction_cost_bps / 10_000.0
-
+    curve = [equity]
+    trades = 0
+    previous_signal = 0
+    cost = transaction_cost_bps / 10_000.0
     for index in range(1, len(prices)):
-        target_position = 1 if signals[index - 1] > 0 else 0
-        if target_position != position:
-            equity *= 1.0 - cost_rate
-            trade_count += 1
-            position = target_position
-
+        signal = signals[index - 1]
+        if signal != previous_signal:
+            trades += 1
+            equity *= 1.0 - cost
+            previous_signal = signal
         period_return = (prices[index] / prices[index - 1]) - 1.0
-        equity *= 1.0 + (period_return * position)
-        peak = max(peak, equity)
-        max_drawdown = min(max_drawdown, (equity / peak) - 1.0)
+        equity *= 1.0 + signal * period_return
+        curve.append(equity)
 
-    payload = {
-        "prices": list(prices),
-        "signals": list(signals),
-        "initial_capital": initial_capital,
-        "transaction_cost_bps": transaction_cost_bps,
-    }
-    reproducibility_hash = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
+    peak = curve[0]
+    max_drawdown = 0.0
+    for value in curve:
+        peak = max(peak, value)
+        max_drawdown = max(max_drawdown, (peak - value) / peak)
+    total_return = equity / initial_capital - 1.0
+    payload = json.dumps(
+        {
+            "initial_capital": initial_capital,
+            "final_equity": equity,
+            "total_return": total_return,
+            "max_drawdown": max_drawdown,
+            "trades": trades,
+            "equity_curve": curve,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    digest = hashlib.sha256(payload).hexdigest()
     return BacktestResult(
         initial_capital=initial_capital,
         final_equity=equity,
-        total_return=(equity / initial_capital) - 1.0,
+        total_return=total_return,
         max_drawdown=max_drawdown,
-        trade_count=trade_count,
-        reproducibility_hash=reproducibility_hash,
+        trades=trades,
+        equity_curve=tuple(curve),
+        reproducibility_hash=digest,
     )
 
 
@@ -111,35 +113,39 @@ def walk_forward_validate(
     *,
     train_size: int,
     test_size: int,
-) -> WalkForwardResult:
-    """Evaluate strictly chronological out-of-sample windows."""
+    step: int | None = None,
+    initial_capital: float = 100_000.0,
+    transaction_cost_bps: float = 0.0,
+) -> tuple[WalkForwardWindow, ...]:
+    """Evaluate chronological out-of-sample windows without shuffling or leakage."""
     _validate_prices(prices)
-    if train_size <= 0 or test_size <= 0:
-        raise ValueError("Train and test sizes must be positive")
-    if train_size + test_size > len(prices):
-        raise ValueError("Train and test windows exceed available data")
+    if train_size < 1 or test_size < 1:
+        raise ValueError("train_size and test_size must be positive")
+    step = test_size if step is None else step
+    if step < 1:
+        raise ValueError("step must be positive")
 
-    out_of_sample_returns: list[float] = []
+    windows: list[WalkForwardWindow] = []
     start = 0
-    train_windows = 0
-
     while start + train_size + test_size <= len(prices):
-        train = prices[start : start + train_size]
-        test = prices[start + train_size : start + train_size + test_size]
-        signal_fn(train)
-        test_signals = tuple(signal_fn(test))
-        _validate_signals(test_signals, len(test))
-        result = backtest(test, lambda _prices, signals=test_signals: signals)
-        out_of_sample_returns.append(result.total_return)
-        train_windows += 1
-        start += test_size
-
-    return WalkForwardResult(
-        train_windows=train_windows,
-        test_windows=len(out_of_sample_returns),
-        out_of_sample_returns=tuple(out_of_sample_returns),
-        aggregate_out_of_sample_return=math.prod(
-            1.0 + result for result in out_of_sample_returns
+        train_end = start + train_size
+        test_end = train_end + test_size
+        train_prices = prices[start:train_end]
+        test_prices = prices[train_end:test_end]
+        # Strategy calibration is deliberately separated from evaluation. The
+        # current deterministic contract accepts the training history as context.
+        train_signals = list(signal_fn(train_prices))
+        if len(train_signals) != len(train_prices):
+            raise ValueError("signal_fn must return one signal per training price")
+        test_signals = list(signal_fn(prices[start:test_end]))[-test_size:]
+        result = run_backtest(
+            test_prices,
+            test_signals,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
         )
-        - 1.0,
-    )
+        windows.append(WalkForwardWindow(start, train_end, train_end, test_end, result))
+        start += step
+    if not windows:
+        raise ValueError("insufficient data for one train/test window")
+    return tuple(windows)
