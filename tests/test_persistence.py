@@ -25,8 +25,9 @@ from colab.persistence import (
 
 
 class FakeCursor:
-    def __init__(self, rows: list[Any] | None = None) -> None:
+    def __init__(self, rows: list[Any] | None = None, result_sets: list[list[Any]] | None = None) -> None:
         self.rows = rows or []
+        self.result_sets = result_sets or []
         self.rowcount = 1
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
 
@@ -38,6 +39,8 @@ class FakeCursor:
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         self.executed.append((sql, params))
+        if self.result_sets:
+            self.rows = self.result_sets.pop(0)
 
     def fetchone(self) -> Any:
         return self.rows.pop(0) if self.rows else None
@@ -108,7 +111,7 @@ def test_create_persists_workflow_children_and_checkpoint() -> None:
 
 
 def test_save_persists_incremented_version_and_children() -> None:
-    cursor = FakeCursor(rows=[(1,), (1,)])
+    cursor = FakeCursor(result_sets=[[(1,)], [(1,)]])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     state = state_with_children()
     assert repository.save(state, 1) == 2
@@ -148,16 +151,50 @@ def test_load_reconstructs_complete_state() -> None:
         "final_package": {"done": True},
         "version": 4,
     }
-    rows = [
-        workflow,
-        {"task_id": task_id, "role": "quant_researcher", "objective": "research", "stage": "research", "status": "done"},
-        {"artifact_id": artifact_id, "kind": "report", "version": 1, "producer": "quant_researcher", "content": {"x": 1}, "created_at": created, "collection": "research"},
-        {"assessment_id": assessment_id, "decision": "approve", "findings": [], "controls": ["limit"], "assessor": "risk_compliance"},
-        {"decision": {"decision": "approve"}},
-        {"approval": {"decision": "approve"}},
-        {"event_id": event_id, "event_type": "created", "stage": "risk", "actor": "system", "message": "ok", "at": created},
+    result_sets = [
+        [
+            {
+                "task_id": task_id,
+                "role": "quant_researcher",
+                "objective": "research",
+                "stage": "research",
+                "status": "done",
+            }
+        ],
+        [
+            {
+                "artifact_id": artifact_id,
+                "kind": "report",
+                "version": 1,
+                "producer": "quant_researcher",
+                "content": {"x": 1},
+                "created_at": created,
+                "collection": "research",
+            }
+        ],
+        [
+            {
+                "assessment_id": assessment_id,
+                "decision": "approve",
+                "findings": [],
+                "controls": ["limit"],
+                "assessor": "risk_compliance",
+            }
+        ],
+        [{"decision": {"decision": "approve"}}],
+        [{"approval": {"decision": "approve"}}],
+        [
+            {
+                "event_id": event_id,
+                "event_type": "created",
+                "stage": "risk",
+                "actor": "system",
+                "message": "ok",
+                "at": created,
+            }
+        ],
     ]
-    cursor = FakeCursor(rows)
+    cursor = FakeCursor(result_sets=result_sets)
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     loaded, version = repository.load(workflow_id)
     assert version == 4
@@ -177,9 +214,16 @@ def test_load_missing_workflow_raises() -> None:
 
 
 def test_save_fails_if_decision_offset_row_is_missing() -> None:
-    cursor = FakeCursor(rows=[(1,)])
+    cursor = FakeCursor(result_sets=[[None]])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     with pytest.raises(PersistenceError, match="decision offset"):
+        repository.save(WorkflowState(product_goal="test"), 1)
+
+
+def test_save_fails_if_approval_offset_row_is_missing() -> None:
+    cursor = FakeCursor(result_sets=[[(0,)], [None]])
+    repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
+    with pytest.raises(PersistenceError, match="approval offset"):
         repository.save(WorkflowState(product_goal="test"), 1)
 
 
