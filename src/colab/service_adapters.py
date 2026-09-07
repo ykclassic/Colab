@@ -1,4 +1,4 @@
-"""Adapters that expose the existing in-memory service contracts over PostgreSQL."""
+"""Adapters that expose the existing service contracts over PostgreSQL."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,11 +9,10 @@ from psycopg import Connection, connect
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
+from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
 
 
 def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[Any]]:
-    """Use Psycopg's tuple-row default so the store readiness query is scalar-safe."""
     if not dsn.strip():
         raise ValueError("dsn must not be empty")
 
@@ -27,14 +26,26 @@ class PostgresWorkspaceManager:
     def __init__(self, store: PostgresPlatformStore) -> None:
         self._store = store
 
-    def submit(self, workspace: Workspace) -> Workspace:
-        return self._store.submit_workspace(workspace)
+    def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
+        return self._store.submit_workspace(workspace, idempotency_key)
 
     def get(self, workspace_id: UUID) -> Workspace:
         return self._store.get_workspace(workspace_id)
 
-    def list(self) -> list[Workspace]:
-        return self._store.list_workspaces()
+    def list(self, include_archived: bool = False) -> list[Workspace]:
+        return self._store.list_workspaces(include_archived)
+
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+        return self._store.update_workspace(workspace_id, expected_version, name, product_goal, priority, strategies)
+
+    def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        return self._store.archive_workspace(workspace_id, expected_version)
+
+    def restore(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        return self._store.restore_workspace(workspace_id, expected_version)
+
+    def delete(self, workspace_id: UUID, expected_version: int) -> None:
+        self._store.delete_workspace(workspace_id, expected_version)
 
 
 class PostgresArtifactStore:
@@ -77,17 +88,8 @@ class PostgresExecutionCoordinator:
         self._store = store
         self.lease_seconds = lease_seconds
 
-    def enqueue(
-        self,
-        workflow_id: UUID,
-        workspace_id: UUID,
-        stage: str,
-        idempotency_key: str,
-        max_attempts: int = 3,
-    ) -> ExecutionJob:
-        return self._store.enqueue_execution(
-            workflow_id, workspace_id, stage, idempotency_key, max_attempts
-        )
+    def enqueue(self, workflow_id: UUID, workspace_id: UUID, stage: str, idempotency_key: str, max_attempts: int = 3) -> ExecutionJob:
+        return self._store.enqueue_execution(workflow_id, workspace_id, stage, idempotency_key, max_attempts)
 
     def claim(self, worker_id: str) -> ExecutionJob | None:
         return self._store.claim_execution(worker_id, self.lease_seconds)
@@ -115,11 +117,5 @@ class PostgresObservabilityRecorder:
     def record(self, event: OperationalEvent) -> OperationalEvent:
         return self._store.record_event(event)
 
-    def query(
-        self,
-        workflow_id: UUID | None = None,
-        workspace_id: UUID | None = None,
-        job_id: UUID | None = None,
-        limit: int = 100,
-    ) -> list[OperationalEvent]:
+    def query(self, workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = 100) -> list[OperationalEvent]:
         return self._store.query_events(workflow_id, workspace_id, job_id, limit)
