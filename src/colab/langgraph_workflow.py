@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import Any, TypedDict
+from contextlib import contextmanager
+from typing import Any, Iterator, TypedDict, cast
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -80,25 +82,27 @@ def build_workflow_graph(checkpointer: Any | None = None) -> Any:
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
 
 
-def create_postgres_checkpointer(dsn: str) -> Any:
-    """Create a production PostgresSaver and initialize its checkpoint tables."""
+@contextmanager
+def create_postgres_checkpointer(dsn: str) -> Iterator[PostgresSaver]:
+    """Yield a production PostgresSaver with its checkpoint schema initialized."""
     if not dsn.strip():
         raise ValueError("dsn must not be empty")
     os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
-    from langgraph.checkpoint.postgres import PostgresSaver
-
-    checkpointer = PostgresSaver.from_conn_string(dsn)
-    checkpointer.setup()
-    return checkpointer
+    with PostgresSaver.from_conn_string(dsn) as checkpointer:
+        checkpointer.setup()
+        yield checkpointer
 
 
 def invoke_workflow(graph: Any, state: WorkflowState, thread_id: str) -> dict[str, Any]:
     """Start a workflow using a stable LangGraph thread identifier."""
     if not thread_id or len(thread_id) > 255:
         raise ValueError("thread_id must be between 1 and 255 characters")
-    return graph.invoke(
-        {"workflow": _encode(state)},
-        {"configurable": {"thread_id": thread_id}},
+    return cast(
+        dict[str, Any],
+        graph.invoke(
+            {"workflow": _encode(state)},
+            {"configurable": {"thread_id": thread_id}},
+        ),
     )
 
 
@@ -116,7 +120,10 @@ def resume_with_human_decision(graph: Any, thread_id: str, decision: Decision) -
     """Resume an interrupted workflow with an explicit human decision."""
     if decision not in {Decision.APPROVE, Decision.REJECT}:
         raise ValueError("human decision must be approve or reject")
-    return graph.invoke(
-        Command(resume={"decision": decision.value}),
-        {"configurable": {"thread_id": thread_id}},
+    return cast(
+        dict[str, Any],
+        graph.invoke(
+            Command(resume={"decision": decision.value}),
+            {"configurable": {"thread_id": thread_id}},
+        ),
     )
