@@ -17,6 +17,7 @@ from .operations import (
     ObservabilityRecorder,
     OperationalEvent,
 )
+from .production_persistence import PostgresPlatformStore, connection_factory_from_dsn
 from .productization import (
     ArtifactRecord,
     InMemoryArtifactStore,
@@ -29,7 +30,6 @@ from .productization import (
     WorkspaceManager,
     build_artifact,
 )
-from .production_persistence import PostgresPlatformStore, connection_factory_from_dsn
 from .service_adapters import (
     PostgresArtifactStore,
     PostgresExecutionCoordinator,
