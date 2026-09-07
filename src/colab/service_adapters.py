@@ -10,6 +10,7 @@ from psycopg import Connection, connect
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
 from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
+from .workspace_lifecycle import WorkspaceLifecycleStore
 
 
 def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[Any]]:
@@ -24,28 +25,28 @@ def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[
 
 class PostgresWorkspaceManager:
     def __init__(self, store: PostgresPlatformStore) -> None:
-        self._store = store
+        self._store = WorkspaceLifecycleStore(store._connection_factory, store.max_concurrent)
 
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
-        return self._store.submit_workspace(workspace, idempotency_key)
+        return self._store.submit(workspace, idempotency_key)
 
     def get(self, workspace_id: UUID) -> Workspace:
-        return self._store.get_workspace(workspace_id)
+        return self._store.get(workspace_id)
 
     def list(self, include_archived: bool = False) -> list[Workspace]:
-        return self._store.list_workspaces(include_archived)
+        return self._store.list(include_archived)
 
     def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
-        return self._store.update_workspace(workspace_id, expected_version, name, product_goal, priority, strategies)
+        return self._store.update(workspace_id, expected_version, name=name, product_goal=product_goal, priority=priority, strategies=strategies)
 
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
-        return self._store.archive_workspace(workspace_id, expected_version)
+        return self._store.archive(workspace_id, expected_version)
 
     def restore(self, workspace_id: UUID, expected_version: int) -> Workspace:
-        return self._store.restore_workspace(workspace_id, expected_version)
+        return self._store.restore(workspace_id, expected_version)
 
     def delete(self, workspace_id: UUID, expected_version: int) -> None:
-        self._store.delete_workspace(workspace_id, expected_version)
+        self._store.delete(workspace_id, expected_version)
 
 
 class PostgresArtifactStore:
