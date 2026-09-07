@@ -9,11 +9,44 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
+from .operations import (
+    EventLevel,
+    ExecutionCoordinator,
+    ExecutionJob,
+    MetricsSnapshot,
+    ObservabilityRecorder,
+    OperationalEvent,
+)
 from .production_persistence import PostgresPlatformStore
-from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
-from .service_adapters import PostgresArtifactStore, PostgresExecutionCoordinator, PostgresKnowledgeBase, PostgresObservabilityRecorder, PostgresToolRegistry, PostgresWorkspaceManager, production_connection_factory_from_dsn
-from .service_contracts import ArtifactService, ExecutionService, KnowledgeService, ObservabilityService, ToolService, WorkspaceService
+from .productization import (
+    ArtifactRecord,
+    InMemoryArtifactStore,
+    KnowledgeBase,
+    KnowledgeDocument,
+    StrategySpec,
+    ToolDefinition,
+    ToolRegistry,
+    Workspace,
+    WorkspaceManager,
+    build_artifact,
+)
+from .service_adapters import (
+    PostgresArtifactStore,
+    PostgresExecutionCoordinator,
+    PostgresKnowledgeBase,
+    PostgresObservabilityRecorder,
+    PostgresToolRegistry,
+    PostgresWorkspaceManager,
+    production_connection_factory_from_dsn,
+)
+from .service_contracts import (
+    ArtifactService,
+    ExecutionService,
+    KnowledgeService,
+    ObservabilityService,
+    ToolService,
+    WorkspaceService,
+)
 from .workspace_api import register_workspace_routes
 
 
