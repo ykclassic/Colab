@@ -1,0 +1,4 @@
+'use client';
+import {useEffect,useState} from 'react';
+import {getWorkspaces,Workspace} from '../lib';
+export default function Workspaces(){const [items,setItems]=useState<Workspace[]>([]);useEffect(()=>{getWorkspaces().then(setItems).catch(()=>setItems([]))},[]);return <><header className="page-head"><div><div className="eyebrow">Portfolio</div><h1>Workspaces</h1><p>Concurrent product and strategy development contexts.</p></div></header><div className="grid grid-2">{items.map(w=><article className="card" key={w.workspace_id}><div className="page-head"><div><h2>{w.name}</h2><p>{w.product_goal}</p></div><span className="pill">{w.status}</span></div><div className="label">Priority {w.priority} · {w.strategies.length} strategies</div></article>)}{!items.length&&<div className="card empty">No workspaces are currently registered.</div>}</div></>}
