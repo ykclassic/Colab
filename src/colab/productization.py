@@ -184,8 +184,31 @@ class WorkspaceManager:
         return sorted(self._workspaces.values(), key=lambda item: (-item.priority, item.created_at))
 
     def _schedule(self) -> None:
-        running = sum(item.status == WorkspaceStatus.RUNNING for item in self._workspaces.values())
-        slots = max(0, self.max_concurrent - running)
+        running = sorted(
+            (item for item in self._workspaces.values() if item.status == WorkspaceStatus.RUNNING),
+            key=lambda item: (item.priority, item.created_at),
+        )
+        queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
+        slots = max(0, self.max_concurrent - len(running))
+
+        # A newly submitted higher-priority workspace may preempt the lowest-priority
+        # running workspace. The scheduler only manages admission state; execution
+        # workers are responsible for safely pausing/cancelling the displaced work.
+        preemptions = min(
+            len(queued),
+            max(0, len(running) - self.max_concurrent + len(queued)),
+        )
+        if running and queued:
+            highest_queued = queued[0]
+            lower_running = [item for item in running if item.priority < highest_queued.priority]
+            preemptions = min(preemptions, len(lower_running))
+            for workspace in lower_running[:preemptions]:
+                workspace.status = WorkspaceStatus.QUEUED
+                workspace.updated_at = datetime.now(UTC)
+            if preemptions:
+                running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
+                slots = max(0, self.max_concurrent - len(running))
+
         if slots == 0:
             return
         queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
