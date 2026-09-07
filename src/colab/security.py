@@ -105,7 +105,7 @@ def authenticate_bearer(token: str) -> Principal:
     jwks_url = f"{issuer}/.well-known/jwks.json"
     try:
         key = _jwks_client(jwks_url).get_signing_key_from_jwt(token).key
-        claims = jwt.decode(
+        claims: dict[str, Any] = jwt.decode(
             token,
             key,
             algorithms=["RS256", "ES256", "EdDSA", "HS256"],
