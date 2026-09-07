@@ -10,6 +10,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from .contracts import AgentTask, Artifact, AuditEvent, RiskAssessment, WorkflowState
+from .policy import validate_state_for_persistence
 
 
 class PersistenceError(RuntimeError):
@@ -39,6 +40,7 @@ class PostgresWorkflowRepository:
             yield connection
 
     def create(self, state: WorkflowState) -> int:
+        validate_state_for_persistence(state)
         payload = state.model_dump(mode="json")
         with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute(
@@ -63,6 +65,7 @@ class PostgresWorkflowRepository:
             return self._load_state(cur, workflow), int(workflow["version"])
 
     def save(self, state: WorkflowState, expected_version: int) -> int:
+        validate_state_for_persistence(state)
         if expected_version < 1:
             raise ValueError("expected_version must be positive")
         new_version = expected_version + 1
