@@ -5,53 +5,20 @@ import os
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .operations import (
-    EventLevel,
-    ExecutionCoordinator,
-    ExecutionJob,
-    MetricsSnapshot,
-    ObservabilityRecorder,
-    OperationalEvent,
-)
+from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import (
-    ArtifactRecord,
-    InMemoryArtifactStore,
-    KnowledgeBase,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    ToolRegistry,
-    Workspace,
-    WorkspaceManager,
-    build_artifact,
-)
-from .service_adapters import (
-    PostgresArtifactStore,
-    PostgresExecutionCoordinator,
-    PostgresKnowledgeBase,
-    PostgresObservabilityRecorder,
-    PostgresToolRegistry,
-    PostgresWorkspaceManager,
-    production_connection_factory_from_dsn,
-)
-from .service_contracts import (
-    ArtifactService,
-    ExecutionService,
-    KnowledgeService,
-    ObservabilityService,
-    ToolService,
-    WorkspaceService,
-)
+from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
+from .service_adapters import PostgresArtifactStore, PostgresExecutionCoordinator, PostgresKnowledgeBase, PostgresObservabilityRecorder, PostgresToolRegistry, PostgresWorkspaceManager, production_connection_factory_from_dsn
+from .service_contracts import ArtifactService, ExecutionService, KnowledgeService, ObservabilityService, ToolService, WorkspaceService
+from .workspace_api import register_workspace_routes
 
 
 class WorkspaceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     name: str = Field(min_length=1, max_length=200)
     product_goal: str = Field(min_length=1, max_length=10000)
     priority: int = Field(default=100, ge=0, le=1000)
@@ -60,7 +27,6 @@ class WorkspaceCreate(BaseModel):
 
 class ArtifactCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     kind: str = Field(min_length=1, max_length=100)
     producer: str = Field(min_length=1, max_length=100)
     content: dict[str, Any]
@@ -68,7 +34,6 @@ class ArtifactCreate(BaseModel):
 
 class KnowledgeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
     source: str = Field(min_length=1, max_length=1000)
@@ -77,7 +42,6 @@ class KnowledgeCreate(BaseModel):
 
 class ExecutionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     workflow_id: UUID
     workspace_id: UUID
     stage: str = Field(min_length=1, max_length=100)
@@ -87,7 +51,6 @@ class ExecutionCreate(BaseModel):
 
 class ExecutionAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     worker_id: str = Field(min_length=1, max_length=255)
 
 
@@ -96,18 +59,13 @@ class ExecutionFailure(ExecutionAction):
 
 
 class PlatformServices:
-    """Compose local deterministic services or durable PostgreSQL services.
-
-    Production never silently falls back to in-memory state. A production process
-    without COLAB_DATABASE_DSN fails during service construction instead.
-    """
+    """Compose local deterministic services or durable PostgreSQL services."""
 
     def __init__(self, max_concurrent: int = 2, database_dsn: str | None = None) -> None:
         dsn = database_dsn or os.getenv("COLAB_DATABASE_DSN")
         production = os.getenv("COLAB_ENV", "development").lower() == "production"
         if production and not dsn:
             raise RuntimeError("COLAB_DATABASE_DSN is required when COLAB_ENV=production")
-
         self.database: PostgresPlatformStore | None = None
         self.workspaces: WorkspaceService
         self.artifacts: ArtifactService
@@ -136,35 +94,18 @@ class PlatformServices:
 
     def _register_safe_defaults(self) -> None:
         defaults = (
-            ToolDefinition(
-                name="market_data",
-                description="Provider-neutral market-data lookup; execution is not permitted.",
-            ),
-            ToolDefinition(
-                name="research_search",
-                description="Search approved research and knowledge sources.",
-            ),
-            ToolDefinition(
-                name="quant_sandbox",
-                description="Run trusted quantitative analysis inside the configured sandbox.",
-            ),
-            ToolDefinition(
-                name="backtest",
-                description="Run deterministic backtests and validation workloads.",
-            ),
-            ToolDefinition(
-                name="artifact_store",
-                description="Read and write versioned workflow artifacts.",
-            ),
+            ToolDefinition(name="market_data", description="Provider-neutral market-data lookup; execution is not permitted."),
+            ToolDefinition(name="research_search", description="Search approved research and knowledge sources."),
+            ToolDefinition(name="quant_sandbox", description="Run trusted quantitative analysis inside the configured sandbox."),
+            ToolDefinition(name="backtest", description="Run deterministic backtests and validation workloads."),
+            ToolDefinition(name="artifact_store", description="Read and write versioned workflow artifacts."),
         )
         for tool in defaults:
             self.tools.register(tool)
 
 
 def create_app(services: PlatformServices | None = None) -> FastAPI:
-    services = services or PlatformServices(
-        max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2"))
-    )
+    services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
     app = FastAPI(title="Colab Agent Platform", version="0.5.0")
     app.state.services = services
 
@@ -187,12 +128,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return services.execution.snapshot()
 
     @app.get("/api/operations/events", response_model=list[OperationalEvent])
-    def operations_events(
-        workflow_id: UUID | None = None,
-        workspace_id: UUID | None = None,
-        job_id: UUID | None = None,
-        limit: int = Query(default=100, ge=1, le=1000),
-    ) -> list[OperationalEvent]:
+    def operations_events(workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = Query(default=100, ge=1, le=1000)) -> list[OperationalEvent]:
         return services.observability.query(workflow_id, workspace_id, job_id, limit)
 
     @app.get("/", response_class=HTMLResponse)
@@ -200,12 +136,12 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return _DASHBOARD_HTML
 
     @app.post("/api/workspaces", response_model=Workspace, status_code=201)
-    def create_workspace(payload: WorkspaceCreate) -> Workspace:
-        return services.workspaces.submit(Workspace(**payload.model_dump()))
+    def create_workspace(payload: WorkspaceCreate, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> Workspace:
+        return services.workspaces.submit(Workspace(**payload.model_dump()), idempotency_key)
 
     @app.get("/api/workspaces", response_model=list[Workspace])
-    def list_workspaces() -> list[Workspace]:
-        return services.workspaces.list()
+    def list_workspaces(include_archived: bool = Query(default=False)) -> list[Workspace]:
+        return services.workspaces.list(include_archived)
 
     @app.get("/api/workspaces/{workspace_id}", response_model=Workspace)
     def get_workspace(workspace_id: UUID) -> Workspace:
@@ -236,9 +172,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
 
     @app.get("/api/knowledge/search", response_model=list[KnowledgeDocument])
-    def search_knowledge(
-        q: str = Query(min_length=1), limit: int = Query(default=10, ge=1, le=100)
-    ) -> list[KnowledgeDocument]:
+    def search_knowledge(q: str = Query(min_length=1), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
         return services.knowledge.search(q, limit)
 
     @app.get("/api/tools", response_model=list[ToolDefinition])
@@ -248,16 +182,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     @app.post("/api/executions", response_model=ExecutionJob, status_code=201)
     def enqueue_execution(payload: ExecutionCreate) -> ExecutionJob:
         job = services.execution.enqueue(**payload.model_dump())
-        services.observability.record(
-            OperationalEvent(
-                workflow_id=job.workflow_id,
-                workspace_id=job.workspace_id,
-                job_id=job.job_id,
-                event_type="execution_enqueued",
-                actor="api",
-                message="Execution job accepted by coordinator.",
-            )
-        )
+        services.observability.record(OperationalEvent(workflow_id=job.workflow_id, workspace_id=job.workspace_id, job_id=job.job_id, event_type="execution_enqueued", actor="api", message="Execution job accepted by coordinator."))
         return job
 
     @app.post("/api/executions/claim", response_model=ExecutionJob)
@@ -265,16 +190,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         job = services.execution.claim(payload.worker_id)
         if job is None:
             raise HTTPException(status_code=409, detail="no execution job available")
-        services.observability.record(
-            OperationalEvent(
-                workflow_id=job.workflow_id,
-                workspace_id=job.workspace_id,
-                job_id=job.job_id,
-                event_type="execution_claimed",
-                actor=payload.worker_id,
-                message="Execution lease claimed.",
-            )
-        )
+        services.observability.record(OperationalEvent(workflow_id=job.workflow_id, workspace_id=job.workspace_id, job_id=job.job_id, event_type="execution_claimed", actor=payload.worker_id, message="Execution lease claimed."))
         return job
 
     @app.post("/api/executions/{job_id}/heartbeat", response_model=ExecutionJob)
@@ -290,16 +206,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
             job = services.execution.complete(job_id, payload.worker_id)
         except (KeyError, PermissionError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        services.observability.record(
-            OperationalEvent(
-                workflow_id=job.workflow_id,
-                workspace_id=job.workspace_id,
-                job_id=job.job_id,
-                event_type="execution_succeeded",
-                actor=payload.worker_id,
-                message="Execution completed successfully.",
-            )
-        )
+        services.observability.record(OperationalEvent(workflow_id=job.workflow_id, workspace_id=job.workspace_id, job_id=job.job_id, event_type="execution_succeeded", actor=payload.worker_id, message="Execution completed successfully."))
         return job
 
     @app.post("/api/executions/{job_id}/fail", response_model=ExecutionJob)
@@ -308,17 +215,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
             job = services.execution.fail(job_id, payload.worker_id, payload.error)
         except (KeyError, PermissionError, RuntimeError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        services.observability.record(
-            OperationalEvent(
-                workflow_id=job.workflow_id,
-                workspace_id=job.workspace_id,
-                job_id=job.job_id,
-                event_type=("execution_failed" if job.status == "failed" else "execution_retry_scheduled"),
-                level=EventLevel.ERROR if job.status == "failed" else EventLevel.WARNING,
-                actor=payload.worker_id,
-                message=job.error or "Execution failed.",
-            )
-        )
+        services.observability.record(OperationalEvent(workflow_id=job.workflow_id, workspace_id=job.workspace_id, job_id=job.job_id, event_type=("execution_failed" if job.status == "failed" else "execution_retry_scheduled"), level=EventLevel.ERROR if job.status == "failed" else EventLevel.WARNING, actor=payload.worker_id, message=job.error or "Execution failed."))
         return job
 
     @app.post("/api/executions/{job_id}/cancel", response_model=ExecutionJob)
@@ -332,6 +229,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
 
 
 app = create_app()
+register_workspace_routes(app)
 
 _DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -353,6 +251,6 @@ async function load(){const [w,t,m]=await Promise.all([fetch('/api/workspaces').
 document.getElementById('workspaces').innerHTML=w.length?w.map(x=>`<p><strong>${x.name}</strong> <span class="pill">${x.status}</span><br>${x.product_goal}</p>`).join(''):'No workspaces yet.';
 document.getElementById('tools').innerHTML=t.map(x=>`<p><strong>${x.name}</strong> — ${x.description}</p>`).join('');
 document.getElementById('metrics').innerHTML=`Pending: ${m.pending} · Running: ${m.running} · Succeeded: ${m.succeeded} · Failed: ${m.failed} · Retries: ${m.retries}`;}
-async function createWorkspace(){const body={name:document.getElementById('name').value,product_goal:document.getElementById('goal').value};const r=await fetch('/api/workspaces',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});document.getElementById('workspaceResult').textContent=r.ok?'Workspace created.':'Creation failed.';load();}
+async function createWorkspace(){const body={name:document.getElementById('name').value,product_goal:document.getElementById('goal').value};const key=crypto.randomUUID();const button=event.currentTarget;button.disabled=true;button.textContent='Creating…';try{const r=await fetch('/api/workspaces',{method:'POST',headers:{'content-type':'application/json','Idempotency-Key':key},body:JSON.stringify(body)});document.getElementById('workspaceResult').textContent=r.ok?'Workspace created.':(await r.text());await load();}finally{button.disabled=false;button.textContent='Create workspace';}}
 load();
 </script></body></html>"""
