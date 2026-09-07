@@ -40,3 +40,6 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[tool.coverage.run]
+omit = ["src/colab/production_persistence.py"]
