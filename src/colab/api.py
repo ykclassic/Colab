@@ -38,6 +38,14 @@ from .service_adapters import (
     PostgresToolRegistry,
     PostgresWorkspaceManager,
 )
+from .service_contracts import (
+    ArtifactService,
+    ExecutionService,
+    KnowledgeService,
+    ObservabilityService,
+    ToolService,
+    WorkspaceService,
+)
 
 
 class WorkspaceCreate(BaseModel):
@@ -100,12 +108,12 @@ class PlatformServices:
             raise RuntimeError("COLAB_DATABASE_DSN is required when COLAB_ENV=production")
 
         self.database: PostgresPlatformStore | None = None
-        self.workspaces: Any
-        self.artifacts: Any
-        self.knowledge: Any
-        self.tools: Any
-        self.execution: Any
-        self.observability: Any
+        self.workspaces: WorkspaceService
+        self.artifacts: ArtifactService
+        self.knowledge: KnowledgeService
+        self.tools: ToolService
+        self.execution: ExecutionService
+        self.observability: ObservabilityService
         lease_seconds = int(os.getenv("COLAB_EXECUTION_LEASE_SECONDS", "300"))
         if dsn:
             store = PostgresPlatformStore(connection_factory_from_dsn(dsn), max_concurrent)
