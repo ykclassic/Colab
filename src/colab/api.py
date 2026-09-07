@@ -17,7 +17,7 @@ from .operations import (
     ObservabilityRecorder,
     OperationalEvent,
 )
-from .production_persistence import PostgresPlatformStore, connection_factory_from_dsn
+from .production_persistence import PostgresPlatformStore
 from .productization import (
     ArtifactRecord,
     InMemoryArtifactStore,
@@ -37,6 +37,7 @@ from .service_adapters import (
     PostgresObservabilityRecorder,
     PostgresToolRegistry,
     PostgresWorkspaceManager,
+    production_connection_factory_from_dsn,
 )
 from .service_contracts import (
     ArtifactService,
@@ -116,7 +117,7 @@ class PlatformServices:
         self.observability: ObservabilityService
         lease_seconds = int(os.getenv("COLAB_EXECUTION_LEASE_SECONDS", "300"))
         if dsn:
-            store = PostgresPlatformStore(connection_factory_from_dsn(dsn), max_concurrent)
+            store = PostgresPlatformStore(production_connection_factory_from_dsn(dsn), max_concurrent)
             self.database = store
             self.workspaces = PostgresWorkspaceManager(store)
             self.artifacts = PostgresArtifactStore(store)
