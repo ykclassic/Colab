@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
@@ -47,7 +47,7 @@ class Artifact(BaseModel):
     version: int = Field(default=1, ge=1)
     producer: AgentRole
     content: dict[str, Any]
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AgentTask(BaseModel):
@@ -78,7 +78,7 @@ class AuditEvent(BaseModel):
     stage: Stage
     actor: AgentRole | str
     message: str
-    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WorkflowState(BaseModel):
