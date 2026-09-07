@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
 from uuid import uuid4
 
 import pytest
 
-from colab.contracts import AgentRole, AgentTask, Artifact, AuditEvent, Decision, RiskAssessment, Stage, WorkflowState
+from colab.contracts import AgentRole, AgentTask, Artifact, Decision, RiskAssessment, Stage, WorkflowState
 from colab.persistence import (
     ConcurrentWorkflowUpdate,
     PersistenceError,
@@ -23,10 +22,10 @@ class FakeCursor:
         self.rowcount = 1
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
 
-    def __enter__(self) -> "FakeCursor":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         return None
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
@@ -42,10 +41,10 @@ class FakeCursor:
 
 
 class FakeTransaction:
-    def __enter__(self) -> "FakeTransaction":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         return None
 
 
@@ -53,10 +52,10 @@ class FakeConnection:
     def __init__(self, cursor: FakeCursor) -> None:
         self.cursor_obj = cursor
 
-    def __enter__(self) -> "FakeConnection":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         return None
 
     def transaction(self) -> FakeTransaction:
