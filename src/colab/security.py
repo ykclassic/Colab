@@ -120,9 +120,11 @@ def authenticate_bearer(token: str) -> Principal:
     if not isinstance(app_metadata, dict):
         raise AuthenticationError("access token has no authorization metadata")
     raw_role = app_metadata.get("colab_role")
+    if not isinstance(raw_role, str):
+        raise AuthenticationError("access token has no valid Colab role")
     try:
         role = PlatformRole(raw_role)
-    except (TypeError, ValueError) as exc:
+    except ValueError as exc:
         raise AuthenticationError("access token has no valid Colab role") from exc
     return Principal(
         user_id=str(claims["sub"]),
