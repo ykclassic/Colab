@@ -4,8 +4,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
-from .productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
 from .production_persistence import PostgresPlatformStore
+from .productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
 
 
 class PostgresWorkspaceManager:
