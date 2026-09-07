@@ -1,9 +1,10 @@
 """HTTP routes for workspace lifecycle management."""
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .productization import StrategySpec, Workspace
@@ -13,7 +14,6 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 class WorkspaceUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     version: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=200)
     product_goal: str = Field(min_length=1, max_length=10000)
@@ -23,21 +23,17 @@ class WorkspaceUpdate(BaseModel):
 
 class WorkspaceVersion(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     version: int = Field(ge=1)
 
 
-def _services(request: Request):
+def _services(request: Request) -> Any:
     return request.app.state.services
 
 
 @router.patch("/{workspace_id}", response_model=Workspace)
 def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, request: Request) -> Workspace:
     try:
-        return _services(request).workspaces.update(
-            workspace_id, payload.version, name=payload.name, product_goal=payload.product_goal,
-            priority=payload.priority, strategies=payload.strategies,
-        )
+        return _services(request).workspaces.update(workspace_id, payload.version, name=payload.name, product_goal=payload.product_goal, priority=payload.priority, strategies=payload.strategies)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
     except (RuntimeError, ValueError) as exc:
@@ -75,6 +71,6 @@ def delete_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Req
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def register_workspace_routes(app) -> None:
-    """Register lifecycle routes without coupling the service composition to the router."""
+def register_workspace_routes(app: Any) -> None:
+    """Register lifecycle routes without coupling service composition to the router."""
     app.include_router(router)
