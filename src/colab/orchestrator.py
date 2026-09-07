@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import ClassVar
 
 from .contracts import AgentRole, Decision, Stage, WorkflowState
 
@@ -22,7 +23,7 @@ class Transition:
 class Orchestrator:
     """Owns stage transitions and enforces the independent risk gate."""
 
-    _linear: dict[Stage, Stage] = {
+    _linear: ClassVar[dict[Stage, Stage]] = {
         Stage.INTAKE: Stage.DECOMPOSITION,
         Stage.DECOMPOSITION: Stage.RESEARCH,
         Stage.RESEARCH: Stage.STRATEGY,
