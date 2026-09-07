@@ -67,12 +67,12 @@ def run_backtest(
     for index in range(1, len(prices)):
         held_signal = signals[index - 1]
         signal = signals[index]
-        if signal != held_signal:
-            trades += 1
-            equity *= 1.0 - cost
         period_return = (prices[index] / prices[index - 1]) - 1.0
         equity *= 1.0 + held_signal * period_return
         curve.append(equity)
+        if signal != held_signal:
+            trades += 1
+            equity *= 1.0 - cost
 
     peak = curve[0]
     max_drawdown = 0.0
