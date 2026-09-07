@@ -1,12 +1,16 @@
 import pytest
 
 from colab.contracts import Decision, RiskAssessment, Stage, WorkflowState
-from colab.langgraph_workflow import build_workflow_graph, resume_with_human_decision
+from colab.langgraph_workflow import (
+    build_workflow_graph,
+    recover_workflow,
+    resume_with_human_decision,
+)
 from colab.quant_validation import run_backtest, walk_forward_validate
 from colab.sandbox import QuantSandbox, SandboxError
 
 
-def test_langgraph_reaches_human_gate_and_resumes() -> None:
+def test_langgraph_reaches_human_gate_and_recovers() -> None:
     state = WorkflowState(product_goal="test", current_stage=Stage.RISK)
     state.risk_assessments.append(RiskAssessment(decision=Decision.APPROVE))
     graph = build_workflow_graph()
@@ -16,9 +20,25 @@ def test_langgraph_reaches_human_gate_and_resumes() -> None:
     assert "__interrupt__" in result
     assert result["workflow"]["current_stage"] == Stage.HUMAN_REVIEW.value
 
+    recovered = recover_workflow(graph, "phase2-test")
+    assert recovered.current_stage == Stage.HUMAN_REVIEW
+    assert recovered.workflow_id == state.workflow_id
+
     resumed = resume_with_human_decision(graph, "phase2-test", Decision.APPROVE)
     assert resumed["workflow"]["current_stage"] == Stage.COMPLETE.value
     assert resumed["workflow"]["approvals"][-1]["decision"] == Decision.APPROVE.value
+
+
+def test_langgraph_human_rejection_is_terminal() -> None:
+    state = WorkflowState(product_goal="test", current_stage=Stage.RISK)
+    state.risk_assessments.append(RiskAssessment(decision=Decision.APPROVE))
+    graph = build_workflow_graph()
+    graph.invoke(
+        {"workflow": state.model_dump(mode="json")},
+        {"configurable": {"thread_id": "phase2-reject"}},
+    )
+    resumed = resume_with_human_decision(graph, "phase2-reject", Decision.REJECT)
+    assert resumed["workflow"]["current_stage"] == Stage.REJECTED.value
 
 
 def test_langgraph_rejects_invalid_human_decision() -> None:
