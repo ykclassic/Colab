@@ -11,17 +11,10 @@ from psycopg import Connection, OperationalError
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .operations import (
-    EventLevel,
-    ExecutionJob,
-    ExecutionStatus,
-    MetricsSnapshot,
-    OperationalEvent,
-)
+from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .productization import (
     ArtifactRecord,
     KnowledgeDocument,
-    StrategySpec,
     ToolDefinition,
     Workspace,
     WorkspaceStatus,
@@ -50,8 +43,6 @@ class PostgresPlatformStore:
             cur.execute("SELECT 1")
             if cur.fetchone() != (1,):
                 raise OperationalError("database readiness query returned an unexpected result")
-
-    # ---- Workspaces -----------------------------------------------------
 
     def submit_workspace(self, workspace: Workspace) -> Workspace:
         with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
@@ -115,8 +106,6 @@ class PostgresPlatformStore:
             (WorkspaceStatus.RUNNING, WorkspaceStatus.QUEUED, slots),
         )
 
-    # ---- Artifacts ------------------------------------------------------
-
     def put_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
         with self._connection() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             lock_key = f"colab:artifact:{artifact.workspace_id}:{artifact.kind}"
@@ -174,8 +163,6 @@ class PostgresPlatformStore:
             )
             return [ArtifactRecord.model_validate(row) for row in cur.fetchall()]
 
-    # ---- Knowledge ------------------------------------------------------
-
     def upsert_knowledge(self, document: KnowledgeDocument) -> KnowledgeDocument:
         with self._connection() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -222,8 +209,6 @@ class PostgresPlatformStore:
         scored.sort(key=lambda item: (-item[0], item[1].created_at, str(item[1].document_id)))
         return [document for _, document in scored[:limit]]
 
-    # ---- Tools ----------------------------------------------------------
-
     def register_tool(self, tool: ToolDefinition) -> ToolDefinition:
         with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute(
@@ -249,8 +234,6 @@ class PostgresPlatformStore:
         with self._connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT * FROM public.platform_tools ORDER BY name")
             return [ToolDefinition.model_validate(row) for row in cur.fetchall()]
-
-    # ---- Execution jobs -------------------------------------------------
 
     def enqueue_execution(
         self,
@@ -319,7 +302,7 @@ class PostgresPlatformStore:
                 (expires, now, job_id, worker_id, now),
             )
             row = cur.fetchone()
-        return self._require_owned_job(row, job_id, "job is not running or lease is not owned")
+        return self._require_owned_job(row, "job is not running or lease is not owned")
 
     def complete_execution(self, job_id: UUID, worker_id: str) -> ExecutionJob:
         now = datetime.now(UTC)
@@ -334,7 +317,7 @@ class PostgresPlatformStore:
                 (now, now, job_id, worker_id, now),
             )
             row = cur.fetchone()
-        return self._require_owned_job(row, job_id, "job is not running or lease is not owned")
+        return self._require_owned_job(row, "job is not running or lease is not owned")
 
     def fail_execution(self, job_id: UUID, worker_id: str, error: str) -> ExecutionJob:
         if not error.strip():
@@ -353,7 +336,7 @@ class PostgresPlatformStore:
                 (error[:5000], now, now, job_id, worker_id, now),
             )
             row = cur.fetchone()
-        return self._require_owned_job(row, job_id, "job is not running or lease is not owned")
+        return self._require_owned_job(row, "job is not running or lease is not owned")
 
     def cancel_execution(self, job_id: UUID) -> ExecutionJob:
         now = datetime.now(UTC)
@@ -394,12 +377,10 @@ class PostgresPlatformStore:
         return ExecutionJob.model_validate(row)
 
     @staticmethod
-    def _require_owned_job(row: Any, job_id: UUID, message: str) -> ExecutionJob:
+    def _require_owned_job(row: Any, message: str) -> ExecutionJob:
         if row is None:
             raise RuntimeError(message)
         return ExecutionJob.model_validate(row)
-
-    # ---- Operations -----------------------------------------------------
 
     def record_event(self, event: OperationalEvent) -> OperationalEvent:
         with self._connection() as conn, conn.transaction(), conn.cursor() as cur:
@@ -460,15 +441,13 @@ class PostgresPlatformStore:
             )
             counts = {str(row["status"]): int(row["count"]) for row in cur.fetchall()}
             cur.execute(
-                """SELECT
-                    COALESCE(sum(GREATEST(attempt - 1, 0)), 0)::int AS retries
-                   FROM public.workflow_execution_jobs"""
+                """SELECT COALESCE(sum(GREATEST(attempt - 1, 0)), 0)::int AS retries
+                     FROM public.workflow_execution_jobs"""
             )
             retries_row = cur.fetchone()
             cur.execute(
-                """SELECT
-                    count(*) FILTER (WHERE event_type='execution_lease_expired')::int AS expired_leases
-                   FROM public.workflow_operational_events"""
+                """SELECT count(*) FILTER (WHERE event_type='execution_lease_expired')::int AS expired_leases
+                     FROM public.workflow_operational_events"""
             )
             lease_row = cur.fetchone()
         return MetricsSnapshot(
