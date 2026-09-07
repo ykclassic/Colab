@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 
 SignalFn = Callable[[Sequence[float]], Sequence[int]]
