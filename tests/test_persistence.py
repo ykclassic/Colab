@@ -39,7 +39,7 @@ class FakeCursor:
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         self.executed.append((sql, params))
-        if self.result_sets:
+        if self.result_sets and sql.lstrip().upper().startswith("SELECT"):
             self.rows = self.result_sets.pop(0)
 
     def fetchone(self) -> Any:
@@ -139,7 +139,20 @@ def test_load_reconstructs_complete_state() -> None:
     artifact_id = uuid4()
     assessment_id = uuid4()
     event_id = uuid4()
+    workflow = {
+        "workflow_id": workflow_id,
+        "schema_version": "1.0",
+        "product_goal": "test",
+        "product_brief": {},
+        "roadmap": [],
+        "current_stage": "risk",
+        "iteration_count": 0,
+        "budgets": {},
+        "final_package": None,
+        "version": 4,
+    }
     result_sets = [
+        [workflow],
         [
             {
                 "task_id": task_id,
