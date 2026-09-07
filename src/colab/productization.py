@@ -16,6 +16,7 @@ class WorkspaceStatus(str):
     PAUSED = "paused"
     COMPLETE = "complete"
     FAILED = "failed"
+    ARCHIVED = "archived"
 
 
 class StrategySpec(BaseModel):
@@ -38,6 +39,8 @@ class Workspace(BaseModel):
     priority: int = Field(default=100, ge=0, le=1000)
     strategies: list[StrategySpec] = Field(default_factory=list)
     created_by: UUID | None = None
+    version: int = Field(default=1, ge=1)
+    archived_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -81,7 +84,6 @@ class ArtifactStore(Protocol):
     """Persistence contract for immutable artifact versions."""
 
     def put(self, artifact: ArtifactRecord) -> ArtifactRecord: ...
-
     def list(self, workspace_id: UUID) -> list[ArtifactRecord]: ...
 
 
@@ -107,11 +109,7 @@ class InMemoryArtifactStore:
 
 
 class KnowledgeBase:
-    """Versioned, provider-neutral lexical knowledge index.
-
-    The interface intentionally permits a vector-backed implementation later without
-    changing workflow consumers. Search is deterministic and dependency-free for Phase 3.
-    """
+    """Versioned, provider-neutral lexical knowledge index."""
 
     def __init__(self) -> None:
         self._documents: dict[UUID, KnowledgeDocument] = {}
@@ -162,15 +160,21 @@ class ToolRegistry:
 
 
 class WorkspaceManager:
-    """Bounded concurrent workspace scheduler with priority ordering."""
+    """Bounded concurrent workspace scheduler with lifecycle management."""
 
     def __init__(self, max_concurrent: int = 2) -> None:
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be positive")
         self.max_concurrent = max_concurrent
         self._workspaces: dict[UUID, Workspace] = {}
+        self._idempotency: dict[str, UUID] = {}
 
-    def submit(self, workspace: Workspace) -> Workspace:
+    def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
+        if idempotency_key:
+            existing_id = self._idempotency.get(idempotency_key)
+            if existing_id is not None:
+                return self.get(existing_id)
+            self._idempotency[idempotency_key] = workspace.workspace_id
         self._workspaces[workspace.workspace_id] = workspace
         self._schedule()
         return workspace
@@ -181,8 +185,63 @@ class WorkspaceManager:
         except KeyError as exc:
             raise KeyError(str(workspace_id)) from exc
 
-    def list(self) -> list[Workspace]:
-        return sorted(self._workspaces.values(), key=lambda item: (-item.priority, item.created_at))
+    def list(self, include_archived: bool = False) -> list[Workspace]:
+        items = self._workspaces.values() if include_archived else (
+            item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED
+        )
+        return sorted(items, key=lambda item: (-item.priority, item.created_at))
+
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            raise ValueError("archived workspace cannot be edited")
+        workspace.name = name
+        workspace.product_goal = product_goal
+        workspace.priority = priority
+        workspace.strategies = strategies
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        self._schedule()
+        return workspace
+
+    def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            return workspace
+        workspace.status = WorkspaceStatus.ARCHIVED
+        workspace.archived_at = datetime.now(UTC)
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        return workspace
+
+    def restore(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status != WorkspaceStatus.ARCHIVED:
+            return workspace
+        workspace.status = WorkspaceStatus.QUEUED
+        workspace.archived_at = None
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        self._schedule()
+        return workspace
+
+    def delete(self, workspace_id: UUID, expected_version: int) -> None:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status != WorkspaceStatus.ARCHIVED:
+            raise ValueError("workspace must be archived before permanent deletion")
+        del self._workspaces[workspace_id]
+        for key, value in list(self._idempotency.items()):
+            if value == workspace_id:
+                del self._idempotency[key]
+
+    @staticmethod
+    def _check_version(workspace: Workspace, expected_version: int) -> None:
+        if expected_version != workspace.version:
+            raise RuntimeError(f"workspace version conflict: expected {expected_version}, current {workspace.version}")
 
     def _schedule(self) -> None:
         running = sorted(
@@ -191,39 +250,20 @@ class WorkspaceManager:
         )
         queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
         slots = max(0, self.max_concurrent - len(running))
-
-        # A newly submitted higher-priority workspace may preempt the lowest-priority
-        # running workspace. The scheduler only manages admission state; execution
-        # workers are responsible for safely pausing/cancelling the displaced work.
-        preemptions = min(
-            len(queued),
-            max(0, len(running) - self.max_concurrent + len(queued)),
-        )
         if running and queued:
             highest_queued = queued[0]
             lower_running = [item for item in running if item.priority < highest_queued.priority]
-            preemptions = min(preemptions, len(lower_running))
-            for workspace in lower_running[:preemptions]:
+            for workspace in lower_running[: max(0, min(len(queued), len(lower_running)))]:
                 workspace.status = WorkspaceStatus.QUEUED
                 workspace.updated_at = datetime.now(UTC)
-            if preemptions:
-                running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
-                slots = max(0, self.max_concurrent - len(running))
-
-        if slots == 0:
-            return
-        queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
-        for workspace in queued[:slots]:
+            running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
+            slots = max(0, self.max_concurrent - len(running))
+        for workspace in [item for item in self.list() if item.status == WorkspaceStatus.QUEUED][:slots]:
             workspace.status = WorkspaceStatus.RUNNING
             workspace.updated_at = datetime.now(UTC)
 
 
-def build_artifact(
-    workspace_id: UUID,
-    kind: str,
-    producer: str,
-    content: dict[str, Any],
-) -> ArtifactRecord:
+def build_artifact(workspace_id: UUID, kind: str, producer: str, content: dict[str, Any]) -> ArtifactRecord:
     """Create a content-addressed artifact; versions are assigned by the store."""
     canonical = repr(sorted(content.items())).encode("utf-8")
     return ArtifactRecord(
