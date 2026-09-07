@@ -9,7 +9,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .operations import ExecutionCoordinator, ExecutionJob, MetricsSnapshot, OperationalEvent, ObservabilityRecorder
+from .operations import (
+    EventLevel,
+    ExecutionCoordinator,
+    ExecutionJob,
+    MetricsSnapshot,
+    ObservabilityRecorder,
+    OperationalEvent,
+)
 from .productization import (
     ArtifactRecord,
     InMemoryArtifactStore,
@@ -251,8 +258,12 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
                 workflow_id=job.workflow_id,
                 workspace_id=job.workspace_id,
                 job_id=job.job_id,
-                event_type="execution_failed" if job.status == "failed" else "execution_retry_scheduled",
-                level="error" if job.status == "failed" else "warning",
+                event_type=(
+                    "execution_failed"
+                    if job.status == "failed"
+                    else "execution_retry_scheduled"
+                ),
+                level=EventLevel.ERROR if job.status == "failed" else EventLevel.WARNING,
                 actor=payload.worker_id,
                 message=job.error or "Execution failed.",
             )
