@@ -100,6 +100,12 @@ class PlatformServices:
             raise RuntimeError("COLAB_DATABASE_DSN is required when COLAB_ENV=production")
 
         self.database: PostgresPlatformStore | None = None
+        self.workspaces: Any
+        self.artifacts: Any
+        self.knowledge: Any
+        self.tools: Any
+        self.execution: Any
+        self.observability: Any
         lease_seconds = int(os.getenv("COLAB_EXECUTION_LEASE_SECONDS", "300"))
         if dsn:
             store = PostgresPlatformStore(connection_factory_from_dsn(dsn), max_concurrent)
