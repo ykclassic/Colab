@@ -1,0 +1,62 @@
+name: Production HTTP Readback Smoke
+
+on:
+  push:
+    branches: [chore/prod-http-smoke-20260907]
+    paths: [verification/trigger-readback.txt]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-readback:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://colab-api-rqoh.onrender.com
+      WORKFLOW_ID: b6a2d8b6-9e7c-4b67-9d2d-4a4d1c9d0f31
+      WORKSPACE_NAME: PROD-HTTP-SMOKE-20260907
+      KNOWLEDGE_TITLE: PROD-HTTP-SMOKE-20260907
+    steps:
+      - name: Verify readiness after redeploy
+        run: |
+          set -euo pipefail
+          body=$(curl --fail-with-body --silent --show-error --retry 5 --retry-delay 2 "$BASE_URL/ready")
+          echo "$body"
+          test "$(jq -r .status <<<"$body")" = ready
+          test "$(jq -r .database <<<"$body")" = ok
+
+      - name: Read workspace after redeploy
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces" | tee /tmp/workspaces.json
+          test "$(jq -r 'map(select(.name=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/workspaces.json)" -eq 1
+          export WORKSPACE_ID=$(jq -r 'map(select(.name=="PROD-HTTP-SMOKE-20260907"))[0].workspace_id' /tmp/workspaces.json)
+          echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_ENV"
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID" | tee /tmp/workspace.json
+          test "$(jq -r .name /tmp/workspace.json)" = "$WORKSPACE_NAME"
+
+      - name: Read artifact after redeploy
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/workspaces/$WORKSPACE_ID/artifacts" | tee /tmp/artifacts.json
+          test "$(jq -r 'map(select(.producer=="production-http-smoke" and .content.marker=="20260907-http")) | length' /tmp/artifacts.json)" -eq 1
+
+      - name: Read knowledge after redeploy
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/knowledge/search" --data-urlencode 'q=Production HTTP persistence verification' | tee /tmp/knowledge.json
+          test "$(jq -r 'map(select(.title=="PROD-HTTP-SMOKE-20260907")) | length' /tmp/knowledge.json)" -eq 1
+
+      - name: Read execution and operational event after redeploy
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --get "$BASE_URL/api/operations/events" --data-urlencode "workflow_id=$WORKFLOW_ID" --data-urlencode "workspace_id=$WORKSPACE_ID" | tee /tmp/events.json
+          test "$(jq -r 'map(select(.event_type=="execution_enqueued")) | length' /tmp/events.json)" -ge 1
+          curl --fail-with-body --silent --show-error "$BASE_URL/api/operations/metrics" | tee /tmp/metrics.json
+          test "$(jq -r '.pending' /tmp/metrics.json)" -ge 1
+
+      - name: Summary
+        run: |
+          echo 'PRODUCTION HTTP READBACK SMOKE: PASS'
+          echo "Workspace: $WORKSPACE_ID"
+          echo "Workflow: $WORKFLOW_ID"
