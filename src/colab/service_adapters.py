@@ -9,7 +9,13 @@ from psycopg import Connection, connect
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
+from .productization import (
+    ArtifactRecord,
+    KnowledgeDocument,
+    StrategySpec,
+    ToolDefinition,
+    Workspace,
+)
 from .workspace_lifecycle import WorkspaceLifecycleStore
 
 
