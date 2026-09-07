@@ -1,12 +1,12 @@
 import pytest
 
 from colab.security import (
+    ROLE_PERMISSIONS,
     ApprovalService,
     AuthorizationError,
     Permission,
     PlatformRole,
     Principal,
-    ROLE_PERMISSIONS,
     principal_from_test_header,
     require_permission,
 )
