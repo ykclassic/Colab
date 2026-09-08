@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
+import colab.service_adapters as adapters
 from colab.operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from colab.productization import ArtifactRecord, KnowledgeDocument, ToolDefinition, Workspace
 from colab.service_adapters import (
@@ -83,6 +86,10 @@ def test_all_postgres_service_adapters_delegate() -> None:
     assert workspace_service.submit(store.workspace) == store.workspace
     assert workspace_service.get(store.workspace.workspace_id) == store.workspace
     assert workspace_service.list() == [store.workspace]
+    assert workspace_service.update(store.workspace.workspace_id, 1, name="w", product_goal="g", priority=1, strategies=[]) == store.workspace
+    assert workspace_service.archive(store.workspace.workspace_id, 1) == store.workspace
+    assert workspace_service.restore(store.workspace.workspace_id, 1) == store.workspace
+    assert workspace_service.delete(store.workspace.workspace_id, 1) is None
     assert artifact_service.put(store.artifact) == store.artifact
     assert artifact_service.list(store.workspace.workspace_id) == [store.artifact]
     assert knowledge_service.upsert(store.document) == store.document
@@ -98,6 +105,14 @@ def test_all_postgres_service_adapters_delegate() -> None:
     assert execution_service.snapshot() == MetricsSnapshot()
     assert observability_service.record(store.event) == store.event
     assert observability_service.query() == [store.event]
+
+
+def test_connection_factory_validation(monkeypatch) -> None:
+    with pytest.raises(ValueError, match="dsn must not be empty"):
+        adapters.production_connection_factory_from_dsn(" ")
+    sentinel = object()
+    monkeypatch.setattr(adapters, "connect", lambda dsn: sentinel)
+    assert adapters.production_connection_factory_from_dsn("postgres://example")() is sentinel
 
 
 def test_postgres_execution_adapter_rejects_invalid_lease() -> None:
