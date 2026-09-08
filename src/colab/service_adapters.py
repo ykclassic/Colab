@@ -1,7 +1,7 @@
 """Adapters that expose the existing service contracts over PostgreSQL."""
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -28,9 +28,9 @@ class PostgresWorkspaceManager:
         return self._store.submit(workspace, idempotency_key)
     def get(self, workspace_id: UUID) -> Workspace:
         return self._store.get(workspace_id)
-    def list(self, include_archived: bool = False) -> Sequence[Workspace]:
+    def list(self, include_archived: bool = False) -> list[Workspace]:
         return self._store.list(include_archived)
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
         return self._store.update(workspace_id, expected_version, name=name, product_goal=product_goal, priority=priority, strategies=strategies)
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
         return self._store.archive(workspace_id, expected_version)
@@ -63,8 +63,6 @@ class PostgresToolRegistry:
         self._store = store
     def register(self, tool: ToolDefinition) -> None:
         self._store.register_tool(tool)
-    def get(self, name: str) -> ToolDefinition:
-        raise NotImplementedError("PostgreSQL tool lookup is not implemented")
     def list(self) -> list[ToolDefinition]:
         return self._store.list_tools()
 
