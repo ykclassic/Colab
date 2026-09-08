@@ -1,0 +1,39 @@
+name: Resolve PR 10 against main
+
+on:
+  push:
+    branches: ['feat/workspace-management']
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge current main and resolve known test conflict
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge origin/main --no-edit || true
+          if git diff --name-only --diff-filter=U | grep -qx 'tests/test_workspace_lifecycle.py'; then
+            git checkout --ours -- tests/test_workspace_lifecycle.py
+            git add tests/test_workspace_lifecycle.py
+          fi
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Unexpected unresolved merge conflicts:" >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            git commit --no-edit
+          fi
+          git rm .github/workflows/resolve-pr10.yml
+          git commit -m "chore: remove temporary PR 10 conflict resolver"
+          git push origin HEAD:feat/workspace-management
