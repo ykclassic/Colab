@@ -18,8 +18,6 @@ from .productization import (
 )
 from .workspace_lifecycle import WorkspaceLifecycleStore
 
-WorkspaceList = Sequence[Workspace]
-
 
 def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[Any]]:
     if not dsn.strip():
@@ -36,8 +34,8 @@ class PostgresWorkspaceManager:
         return self._store.submit(workspace, idempotency_key)
     def get(self, workspace_id: UUID) -> Workspace:
         return self._store.get(workspace_id)
-    def list(self, include_archived: bool = False) -> WorkspaceList:
-        return self._store.list(include_archived)
+    def list(self, include_archived: bool = False) -> list[Workspace]:
+        return list(self._store.list(include_archived))
     def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
         return self._store.update(workspace_id, expected_version, name=name, product_goal=product_goal, priority=priority, strategies=strategies)
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
