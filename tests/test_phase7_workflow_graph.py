@@ -19,19 +19,24 @@ def _approved_state() -> WorkflowState:
     return state
 
 
+def _workflow(result: WorkflowGraphState) -> WorkflowState:
+    return WorkflowState.model_validate(result["workflow"])
+
+
 def test_graph_reaches_human_review_and_resumes_to_complete() -> None:
     graph = WorkflowGraph().compile(checkpointer=InMemorySaver())
     state = _approved_state()
     config = {"configurable": {"thread_id": str(state.workflow_id)}}
 
     paused = graph.invoke(WorkflowGraphState(workflow=state), config)
-    assert paused["workflow"].current_stage is Stage.HUMAN_REVIEW
+    assert _workflow(paused).current_stage is Stage.HUMAN_REVIEW
     assert "__interrupt__" in paused
     assert paused["__interrupt__"]
 
     completed = graph.invoke(Command(resume={"decision": "approve"}), config)
-    assert completed["workflow"].current_stage is Stage.COMPLETE
-    assert completed["workflow"].approvals[-1]["decision"] == Decision.APPROVE.value
+    final_state = _workflow(completed)
+    assert final_state.current_stage is Stage.COMPLETE
+    assert final_state.approvals[-1]["decision"] == Decision.APPROVE.value
 
 
 def test_graph_preserves_risk_rejection() -> None:
@@ -40,10 +45,9 @@ def test_graph_preserves_risk_rejection() -> None:
     state.risk_assessments.append(RiskAssessment(decision=Decision.REJECT))
 
     result = graph.invoke(WorkflowGraphState(workflow=state))
-    assert result["workflow"].current_stage is Stage.REJECTED
-    assert any(
-        event.event_type == "risk_gate_blocked" for event in result["workflow"].audit_events
-    )
+    workflow = _workflow(result)
+    assert workflow.current_stage is Stage.REJECTED
+    assert any(event.event_type == "risk_gate_blocked" for event in workflow.audit_events)
 
 
 def test_graph_requires_final_package_before_human_review() -> None:
