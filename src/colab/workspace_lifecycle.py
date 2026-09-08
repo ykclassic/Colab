@@ -1,7 +1,7 @@
 """Durable workspace lifecycle operations with idempotency and optimistic concurrency."""
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from .productization import StrategySpec, Workspace, WorkspaceStatus
 
 ConnectionFactory = Callable[[], Connection[Any]]
+WorkspaceList = list[Workspace]
 
 
 class WorkspaceLifecycleStore:
@@ -28,14 +29,12 @@ class WorkspaceLifecycleStore:
                 existing = cur.fetchone()
                 if existing is not None:
                     return Workspace.model_validate(existing)
-            cur.execute(
-                """INSERT INTO public.product_workspaces
+            cur.execute("""INSERT INTO public.product_workspaces
                 (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
                 (workspace.workspace_id, workspace.name, workspace.product_goal, workspace.status, workspace.priority,
                  Jsonb([strategy.model_dump(mode="json") for strategy in workspace.strategies]), workspace.created_by,
-                 workspace.version, workspace.archived_at, idempotency_key, workspace.created_at, workspace.updated_at),
-            )
+                 workspace.version, workspace.archived_at, idempotency_key, workspace.created_at, workspace.updated_at))
             row = cur.fetchone()
             self._schedule(cur)
             if row is None:
@@ -50,7 +49,7 @@ class WorkspaceLifecycleStore:
             raise KeyError(str(workspace_id))
         return Workspace.model_validate(row)
 
-    def list(self, include_archived: bool = False) -> Sequence[Workspace]:
+    def list(self, include_archived: bool = False) -> WorkspaceList:
         sql = "SELECT * FROM public.product_workspaces"
         if not include_archived:
             sql += " WHERE status <> %s"
@@ -59,45 +58,36 @@ class WorkspaceLifecycleStore:
             cur.execute(sql, () if include_archived else (WorkspaceStatus.ARCHIVED,))
             return [Workspace.model_validate(row) for row in cur.fetchall()]
 
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """UPDATE public.product_workspaces
-                   SET name=%s, product_goal=%s, priority=%s, strategies=%s,
+            cur.execute("""UPDATE public.product_workspaces SET name=%s, product_goal=%s, priority=%s, strategies=%s,
                        version=version+1, updated_at=now()
                  WHERE workspace_id=%s AND version=%s AND status <> %s RETURNING *""",
-                (name, product_goal, priority, Jsonb([s.model_dump(mode="json") for s in strategies]), workspace_id, expected_version, WorkspaceStatus.ARCHIVED),
-            )
+                (name, product_goal, priority, Jsonb([s.model_dump(mode="json") for s in strategies]), workspace_id, expected_version, WorkspaceStatus.ARCHIVED))
             row = cur.fetchone()
             if row is None:
-                self._raise_version_or_missing(cur, workspace_id, expected_version, "workspace cannot be edited")
+                self._raise_version_or_missing(cur, workspace_id, expected_version)
             self._schedule(cur)
             return Workspace.model_validate(row)
 
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """UPDATE public.product_workspaces
-                   SET status=%s, archived_at=now(), version=version+1, updated_at=now()
+            cur.execute("""UPDATE public.product_workspaces SET status=%s, archived_at=now(), version=version+1, updated_at=now()
                  WHERE workspace_id=%s AND version=%s AND status <> %s RETURNING *""",
-                (WorkspaceStatus.ARCHIVED, workspace_id, expected_version, WorkspaceStatus.ARCHIVED),
-            )
+                (WorkspaceStatus.ARCHIVED, workspace_id, expected_version, WorkspaceStatus.ARCHIVED))
             row = cur.fetchone()
             if row is None:
-                self._raise_version_or_missing(cur, workspace_id, expected_version, "workspace cannot be archived")
+                self._raise_version_or_missing(cur, workspace_id, expected_version)
             return Workspace.model_validate(row)
 
     def restore(self, workspace_id: UUID, expected_version: int) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """UPDATE public.product_workspaces
-                   SET status=%s, archived_at=NULL, version=version+1, updated_at=now()
+            cur.execute("""UPDATE public.product_workspaces SET status=%s, archived_at=NULL, version=version+1, updated_at=now()
                  WHERE workspace_id=%s AND version=%s AND status=%s RETURNING *""",
-                (WorkspaceStatus.QUEUED, workspace_id, expected_version, WorkspaceStatus.ARCHIVED),
-            )
+                (WorkspaceStatus.QUEUED, workspace_id, expected_version, WorkspaceStatus.ARCHIVED))
             row = cur.fetchone()
             if row is None:
-                self._raise_version_or_missing(cur, workspace_id, expected_version, "workspace is not archived or version changed")
+                self._raise_version_or_missing(cur, workspace_id, expected_version)
             self._schedule(cur)
             return Workspace.model_validate(row)
 
@@ -120,17 +110,13 @@ class WorkspaceLifecycleStore:
         running = int(cur.fetchone()[0])
         slots = max(0, self.max_concurrent - running)
         if slots:
-            cur.execute(
-                """UPDATE public.product_workspaces SET status=%s, updated_at=now()
-                   WHERE workspace_id IN (
-                     SELECT workspace_id FROM public.product_workspaces
-                     WHERE status=%s ORDER BY priority DESC, created_at, workspace_id LIMIT %s
-                   )""",
-                (WorkspaceStatus.RUNNING, WorkspaceStatus.QUEUED, slots),
-            )
+            cur.execute("""UPDATE public.product_workspaces SET status=%s, updated_at=now()
+                   WHERE workspace_id IN (SELECT workspace_id FROM public.product_workspaces
+                     WHERE status=%s ORDER BY priority DESC, created_at, workspace_id LIMIT %s)""",
+                (WorkspaceStatus.RUNNING, WorkspaceStatus.QUEUED, slots))
 
     @staticmethod
-    def _raise_version_or_missing(cur: Any, workspace_id: UUID, expected_version: int, message: str) -> None:
+    def _raise_version_or_missing(cur: Any, workspace_id: UUID, expected_version: int) -> None:
         cur.execute("SELECT version FROM public.product_workspaces WHERE workspace_id=%s", (workspace_id,))
         row = cur.fetchone()
         if row is None:
