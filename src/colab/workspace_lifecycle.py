@@ -1,7 +1,7 @@
 """Durable workspace lifecycle operations with idempotency and optimistic concurrency."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -12,7 +12,8 @@ from psycopg.types.json import Jsonb
 from .productization import StrategySpec, Workspace, WorkspaceStatus
 
 ConnectionFactory = Callable[[], Connection[Any]]
-WorkspaceList = list[Workspace]
+WorkspaceList = Sequence[Workspace]
+StrategyList = Sequence[StrategySpec]
 
 
 class WorkspaceLifecycleStore:
@@ -58,7 +59,7 @@ class WorkspaceLifecycleStore:
             cur.execute(sql, () if include_archived else (WorkspaceStatus.ARCHIVED,))
             return [Workspace.model_validate(row) for row in cur.fetchall()]
 
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: StrategyList) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             cur.execute("""UPDATE public.product_workspaces SET name=%s, product_goal=%s, priority=%s, strategies=%s,
                        version=version+1, updated_at=now()
