@@ -1,4 +1,3 @@
-# ruff: noqa
 """LangGraph adapter for the canonical Colab workflow state machine.
 
 The graph is intentionally thin: ``WorkflowState`` remains the source of truth and
@@ -12,6 +11,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 
 from .contracts import Decision, Stage, WorkflowState
@@ -90,7 +90,7 @@ class WorkflowGraph:
             else Stage.REJECTED.value
         )
 
-    def compile(self, *, checkpointer: object | None = None):
+    def compile(self, *, checkpointer: object | None = None) -> CompiledStateGraph:
         """Compile the graph; pass a durable checkpointer for production execution."""
         builder = StateGraph(WorkflowGraphState)
         for stage in (
