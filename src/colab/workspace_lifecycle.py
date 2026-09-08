@@ -1,8 +1,7 @@
 """Durable workspace lifecycle operations with idempotency and optimistic concurrency."""
 from __future__ import annotations
 
-import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -51,7 +50,7 @@ class WorkspaceLifecycleStore:
             raise KeyError(str(workspace_id))
         return Workspace.model_validate(row)
 
-    def list(self, include_archived: bool = False) -> builtins.list[Workspace]:
+    def list(self, include_archived: bool = False) -> Sequence[Workspace]:
         sql = "SELECT * FROM public.product_workspaces"
         if not include_archived:
             sql += " WHERE status <> %s"
@@ -60,7 +59,7 @@ class WorkspaceLifecycleStore:
             cur.execute(sql, () if include_archived else (WorkspaceStatus.ARCHIVED,))
             return [Workspace.model_validate(row) for row in cur.fetchall()]
 
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """UPDATE public.product_workspaces
