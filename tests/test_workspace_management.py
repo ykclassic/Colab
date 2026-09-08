@@ -64,6 +64,6 @@ def test_workspace_http_management_and_duplicate_post() -> None:
     assert archive.status_code == 200
     assert archive.json()["status"] == "archived"
 
-    deleted = client.delete(f"/api/workspaces/{workspace_id}", json={"version": archive.json()["version"]})
+    deleted = client.request("DELETE", f"/api/workspaces/{workspace_id}", json={"version": archive.json()["version"]})
     assert deleted.status_code == 204
     assert client.get(f"/api/workspaces/{workspace_id}").status_code == 404
