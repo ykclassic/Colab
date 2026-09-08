@@ -5,7 +5,7 @@ import builtins
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any, List, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -170,7 +170,7 @@ class WorkspaceManager:
         except KeyError as exc:
             raise KeyError(str(workspace_id)) from exc
 
-    def list(self, include_archived: bool = False) -> builtins.list[Workspace]:
+    def list(self, include_archived: bool = False) -> List[Workspace]:
         items = self._workspaces.values() if include_archived else (item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED)
         return sorted(items, key=lambda item: (-item.priority, item.created_at))
 
