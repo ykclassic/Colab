@@ -8,12 +8,12 @@ interrupt without moving policy decisions into an LLM.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from .contracts import Decision, WorkflowState
+from .contracts import Decision, Stage, WorkflowState
 from .orchestrator import Orchestrator, WorkflowError
 
 
@@ -24,11 +24,7 @@ class WorkflowGraphState(TypedDict):
 
 
 class WorkflowGraph:
-    """Compile and run the deterministic workflow as a LangGraph graph.
-
-    The graph advances one policy-controlled stage at a time. Human review is an
-    explicit interrupt and therefore cannot be bypassed by a model response.
-    """
+    """Compile the canonical workflow as an explicit LangGraph state machine."""
 
     def __init__(self, orchestrator: Orchestrator | None = None) -> None:
         self._orchestrator = orchestrator or Orchestrator()
@@ -60,58 +56,71 @@ class WorkflowGraph:
         return {"workflow": workflow}
 
     @staticmethod
-    def _route_after_human_review(state: WorkflowGraphState) -> str:
-        workflow = state["workflow"]
-        if workflow.approvals[-1]["decision"] == Decision.APPROVE.value:
-            return "complete"
-        return "rejected"
-
-    @staticmethod
     def _complete(state: WorkflowGraphState) -> WorkflowGraphState:
         workflow = state["workflow"]
-        workflow.current_stage = workflow.current_stage.COMPLETE
+        workflow.current_stage = Stage.COMPLETE
         workflow.record("workflow_completed", "orchestrator", "human approval accepted")
         return {"workflow": workflow}
 
     @staticmethod
     def _reject(state: WorkflowGraphState) -> WorkflowGraphState:
         workflow = state["workflow"]
-        workflow.current_stage = workflow.current_stage.REJECTED
+        workflow.current_stage = Stage.REJECTED
         workflow.record("workflow_rejected", "human", "human approval rejected")
         return {"workflow": workflow}
 
+    @staticmethod
+    def _route_after_human_review(state: WorkflowGraphState) -> str:
+        workflow = state["workflow"]
+        return (
+            "complete"
+            if workflow.approvals[-1]["decision"] == Decision.APPROVE.value
+            else "rejected"
+        )
+
     def compile(self, *, checkpointer: object | None = None):
-        """Compile the graph; callers should supply a durable checkpointer in production."""
+        """Compile the graph; pass a durable checkpointer for production execution."""
         builder = StateGraph(WorkflowGraphState)
-        builder.add_node("advance", self._advance)
-        builder.add_node("human_review", self._human_review)
-        builder.add_node("complete", self._complete)
-        builder.add_node("rejected", self._reject)
-        builder.add_edge(START, "advance")
+        nodes: dict[str, Callable[[WorkflowGraphState], WorkflowGraphState]] = {}
+        for stage in (
+            Stage.INTAKE,
+            Stage.DECOMPOSITION,
+            Stage.RESEARCH,
+            Stage.STRATEGY,
+            Stage.RISK,
+            Stage.IMPLEMENTATION,
+            Stage.VALIDATION,
+            Stage.SYNTHESIS,
+        ):
+            name = stage.value
+            nodes[name] = self._advance
+            builder.add_node(name, self._advance)
+
+        builder.add_node(Stage.HUMAN_REVIEW.value, self._human_review)
+        builder.add_node(Stage.COMPLETE.value, self._complete)
+        builder.add_node(Stage.REJECTED.value, self._reject)
+        builder.add_edge(START, Stage.INTAKE.value)
+
+        ordered = [
+            Stage.INTAKE,
+            Stage.DECOMPOSITION,
+            Stage.RESEARCH,
+            Stage.STRATEGY,
+            Stage.RISK,
+            Stage.IMPLEMENTATION,
+            Stage.VALIDATION,
+            Stage.SYNTHESIS,
+        ]
+        for current, following in zip(ordered, ordered[1:]):
+            builder.add_edge(current.value, following.value)
+        builder.add_edge(Stage.SYNTHESIS.value, Stage.HUMAN_REVIEW.value)
         builder.add_conditional_edges(
-            "advance",
-            lambda state: state["workflow"].current_stage.value,
-            {
-                "human_review": "human_review",
-                "complete": "complete",
-                "rejected": "rejected",
-                "intake": "advance",
-                "decomposition": "advance",
-                "research": "advance",
-                "strategy": "advance",
-                "risk": "advance",
-                "implementation": "advance",
-                "validation": "advance",
-                "synthesis": "advance",
-            },
-        )
-        builder.add_conditional_edges(
-            "human_review",
+            Stage.HUMAN_REVIEW.value,
             self._route_after_human_review,
-            {"complete": "complete", "rejected": "rejected"},
+            {"complete": Stage.COMPLETE.value, "rejected": Stage.REJECTED.value},
         )
-        builder.add_edge("complete", END)
-        builder.add_edge("rejected", END)
+        builder.add_edge(Stage.COMPLETE.value, END)
+        builder.add_edge(Stage.REJECTED.value, END)
         if checkpointer is None:
             return builder.compile()
         return builder.compile(checkpointer=checkpointer)
