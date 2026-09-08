@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import UTC, datetime
-from uuid import uuid4
 
 import pytest
 
@@ -119,7 +117,6 @@ def test_version_and_state_conflicts() -> None:
 
 
 def test_scheduler_respects_concurrency() -> None:
-    workspace = Workspace(name="Alpha", product_goal="Goal")
     store, cursor = make_store([(0,)])
     store._schedule(cursor)
     assert any("pg_advisory_xact_lock" in sql for sql in cursor.executed)

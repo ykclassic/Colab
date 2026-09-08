@@ -1,6 +1,7 @@
 """Phase 3 productization primitives: workspaces, artifacts, tools, and knowledge."""
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -16,11 +17,11 @@ class WorkspaceStatus(str):
     PAUSED = "paused"
     COMPLETE = "complete"
     FAILED = "failed"
+    ARCHIVED = "archived"
 
 
 class StrategySpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     strategy_id: UUID = Field(default_factory=uuid4)
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=5000)
@@ -30,7 +31,6 @@ class StrategySpec(BaseModel):
 
 class Workspace(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     workspace_id: UUID = Field(default_factory=uuid4)
     name: str = Field(min_length=1, max_length=200)
     product_goal: str = Field(min_length=1, max_length=10000)
@@ -38,13 +38,14 @@ class Workspace(BaseModel):
     priority: int = Field(default=100, ge=0, le=1000)
     strategies: list[StrategySpec] = Field(default_factory=list)
     created_by: UUID | None = None
+    version: int = Field(default=1, ge=1)
+    archived_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ArtifactRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     artifact_id: UUID = Field(default_factory=uuid4)
     workspace_id: UUID
     kind: str = Field(min_length=1, max_length=100)
@@ -57,7 +58,6 @@ class ArtifactRecord(BaseModel):
 
 class KnowledgeDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     document_id: UUID = Field(default_factory=uuid4)
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
@@ -69,7 +69,6 @@ class KnowledgeDocument(BaseModel):
 
 class ToolDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     description: str = Field(min_length=1, max_length=1000)
     allowed: bool = True
@@ -78,27 +77,21 @@ class ToolDefinition(BaseModel):
 
 
 class ArtifactStore(Protocol):
-    """Persistence contract for immutable artifact versions."""
-
     def put(self, artifact: ArtifactRecord) -> ArtifactRecord: ...
-
     def list(self, workspace_id: UUID) -> list[ArtifactRecord]: ...
 
 
 @dataclass
 class InMemoryArtifactStore:
-    """Deterministic store used by tests and local development."""
-
     records: dict[UUID, list[ArtifactRecord]] = field(default_factory=dict)
 
     def put(self, artifact: ArtifactRecord) -> ArtifactRecord:
         versions = self.records.setdefault(artifact.workspace_id, [])
         if any(item.content_hash == artifact.content_hash and item.kind == artifact.kind for item in versions):
             return next(item for item in versions if item.content_hash == artifact.content_hash and item.kind == artifact.kind)
-        if versions:
-            same_kind = [item for item in versions if item.kind == artifact.kind]
-            if same_kind:
-                artifact.version = max(item.version for item in same_kind) + 1
+        same_kind = [item for item in versions if item.kind == artifact.kind]
+        if same_kind:
+            artifact.version = max(item.version for item in same_kind) + 1
         versions.append(artifact)
         return artifact
 
@@ -107,12 +100,6 @@ class InMemoryArtifactStore:
 
 
 class KnowledgeBase:
-    """Versioned, provider-neutral lexical knowledge index.
-
-    The interface intentionally permits a vector-backed implementation later without
-    changing workflow consumers. Search is deterministic and dependency-free for Phase 3.
-    """
-
     def __init__(self) -> None:
         self._documents: dict[UUID, KnowledgeDocument] = {}
 
@@ -140,8 +127,6 @@ class KnowledgeBase:
 
 
 class ToolRegistry:
-    """Allow-list registry for platform tools."""
-
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
@@ -162,15 +147,19 @@ class ToolRegistry:
 
 
 class WorkspaceManager:
-    """Bounded concurrent workspace scheduler with priority ordering."""
-
     def __init__(self, max_concurrent: int = 2) -> None:
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be positive")
         self.max_concurrent = max_concurrent
         self._workspaces: dict[UUID, Workspace] = {}
+        self._idempotency: dict[str, UUID] = {}
 
-    def submit(self, workspace: Workspace) -> Workspace:
+    def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
+        if idempotency_key:
+            existing_id = self._idempotency.get(idempotency_key)
+            if existing_id is not None:
+                return self.get(existing_id)
+            self._idempotency[idempotency_key] = workspace.workspace_id
         self._workspaces[workspace.workspace_id] = workspace
         self._schedule()
         return workspace
@@ -181,55 +170,76 @@ class WorkspaceManager:
         except KeyError as exc:
             raise KeyError(str(workspace_id)) from exc
 
-    def list(self) -> list[Workspace]:
-        return sorted(self._workspaces.values(), key=lambda item: (-item.priority, item.created_at))
+    def list(self, include_archived: bool = False) -> list[Workspace]:
+        items = self._workspaces.values() if include_archived else (item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED)
+        return sorted(items, key=lambda item: (-item.priority, item.created_at))
+
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            raise ValueError("archived workspace cannot be edited")
+        workspace.name, workspace.product_goal, workspace.priority, workspace.strategies = name, product_goal, priority, [*strategies]
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        self._schedule()
+        return workspace
+
+    def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status == WorkspaceStatus.ARCHIVED:
+            return workspace
+        workspace.status = WorkspaceStatus.ARCHIVED
+        workspace.archived_at = datetime.now(UTC)
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        return workspace
+
+    def restore(self, workspace_id: UUID, expected_version: int) -> Workspace:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status != WorkspaceStatus.ARCHIVED:
+            return workspace
+        workspace.status = WorkspaceStatus.QUEUED
+        workspace.archived_at = None
+        workspace.version += 1
+        workspace.updated_at = datetime.now(UTC)
+        self._schedule()
+        return workspace
+
+    def delete(self, workspace_id: UUID, expected_version: int) -> None:
+        workspace = self.get(workspace_id)
+        self._check_version(workspace, expected_version)
+        if workspace.status != WorkspaceStatus.ARCHIVED:
+            raise ValueError("workspace must be archived before permanent deletion")
+        del self._workspaces[workspace_id]
+        for key, value in list(self._idempotency.items()):
+            if value == workspace_id:
+                del self._idempotency[key]
+
+    @staticmethod
+    def _check_version(workspace: Workspace, expected_version: int) -> None:
+        if expected_version != workspace.version:
+            raise RuntimeError(f"workspace version conflict: expected {expected_version}, current {workspace.version}")
 
     def _schedule(self) -> None:
-        running = sorted(
-            (item for item in self._workspaces.values() if item.status == WorkspaceStatus.RUNNING),
-            key=lambda item: (item.priority, item.created_at),
-        )
+        running = sorted((item for item in self._workspaces.values() if item.status == WorkspaceStatus.RUNNING), key=lambda item: (item.priority, item.created_at))
         queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
         slots = max(0, self.max_concurrent - len(running))
-
-        # A newly submitted higher-priority workspace may preempt the lowest-priority
-        # running workspace. The scheduler only manages admission state; execution
-        # workers are responsible for safely pausing/cancelling the displaced work.
-        preemptions = min(
-            len(queued),
-            max(0, len(running) - self.max_concurrent + len(queued)),
-        )
         if running and queued:
             highest_queued = queued[0]
             lower_running = [item for item in running if item.priority < highest_queued.priority]
-            preemptions = min(preemptions, len(lower_running))
-            for workspace in lower_running[:preemptions]:
+            for workspace in lower_running[: min(len(queued), len(lower_running))]:
                 workspace.status = WorkspaceStatus.QUEUED
                 workspace.updated_at = datetime.now(UTC)
-            if preemptions:
-                running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
-                slots = max(0, self.max_concurrent - len(running))
-
-        if slots == 0:
-            return
-        queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
-        for workspace in queued[:slots]:
+            running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
+            slots = max(0, self.max_concurrent - len(running))
+        for workspace in [item for item in self.list() if item.status == WorkspaceStatus.QUEUED][:slots]:
             workspace.status = WorkspaceStatus.RUNNING
             workspace.updated_at = datetime.now(UTC)
 
 
-def build_artifact(
-    workspace_id: UUID,
-    kind: str,
-    producer: str,
-    content: dict[str, Any],
-) -> ArtifactRecord:
-    """Create a content-addressed artifact; versions are assigned by the store."""
+def build_artifact(workspace_id: UUID, kind: str, producer: str, content: dict[str, Any]) -> ArtifactRecord:
     canonical = repr(sorted(content.items())).encode("utf-8")
-    return ArtifactRecord(
-        workspace_id=workspace_id,
-        kind=kind,
-        producer=producer,
-        content=content,
-        content_hash=sha256(canonical).hexdigest(),
-    )
+    return ArtifactRecord(workspace_id=workspace_id, kind=kind, producer=producer, content=content, content_hash=sha256(canonical).hexdigest())
