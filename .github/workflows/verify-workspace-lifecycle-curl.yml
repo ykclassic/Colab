@@ -63,6 +63,10 @@ jobs:
               version = restored['version']
               _, restored_read = request('GET', f'/api/workspaces/{workspace_id}')
               assert restored_read['version'] == version and restored_read['status'] != 'archived'
+              request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, expected={409})
+              _, archived_again = request('POST', f'/api/workspaces/{workspace_id}/archive', {'version': version})
+              version = archived_again['version']
+              assert archived_again['status'] == 'archived'
               request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, expected={204})
               workspace_id = None
               request('GET', f'/api/workspaces/{restored_read["workspace_id"]}', expected={404})
