@@ -45,9 +45,9 @@ jobs:
           try:
               request('GET', '/ready')
               payload = {'name': marker, 'product_goal': 'production lifecycle verification', 'priority': 777, 'strategies': []}
-              _, created = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, {201})
+              _, created = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, expected={201})
               workspace_id = created['workspace_id']
-              _, replay = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, {201})
+              _, replay = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, expected={201})
               assert replay['workspace_id'] == workspace_id
               _, current = request('GET', f'/api/workspaces/{workspace_id}')
               version = current['version']
@@ -63,7 +63,7 @@ jobs:
               version = restored['version']
               _, restored_read = request('GET', f'/api/workspaces/{workspace_id}')
               assert restored_read['version'] == version and restored_read['status'] != 'archived'
-              request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, {204})
+              request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, expected={204})
               workspace_id = None
               request('GET', f'/api/workspaces/{restored_read["workspace_id"]}', expected={404})
               print('WORKSPACE LIFECYCLE E2E: PASS')
@@ -74,6 +74,6 @@ jobs:
                   if current['status'] != 'archived':
                       _, current = request('POST', f'/api/workspaces/{workspace_id}/archive', {'version': version})
                       version = current['version']
-                  request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, {204})
+                  request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, expected={204})
                   print('CLEANUP: deleted test workspace')
           PY
