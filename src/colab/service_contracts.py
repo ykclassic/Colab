@@ -1,7 +1,6 @@
 """Structural contracts shared by local and PostgreSQL service implementations."""
 from __future__ import annotations
 
-import builtins
 from typing import List, Protocol
 from uuid import UUID
 
