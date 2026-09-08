@@ -90,9 +90,9 @@ class WorkflowGraph:
             else Stage.REJECTED.value
         )
 
-    def compile(self, *, checkpointer: object | None = None) -> Any:
+    def compile(self, *, checkpointer: Any = None) -> Any:
         """Compile the graph; pass a durable checkpointer for production execution."""
-        builder = StateGraph(WorkflowGraphState)
+        builder: Any = StateGraph(WorkflowGraphState)
         for stage in (
             Stage.INTAKE,
             Stage.DECOMPOSITION,
