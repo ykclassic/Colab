@@ -1,7 +1,7 @@
 """HTTP routes for Phase 8 Knowledge & Research Intelligence."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
@@ -39,7 +39,7 @@ class ResearchSearchRequest(BaseModel):
 
 
 def _engine(request: Request) -> ResearchIntelligence:
-    return request.app.state.research_intelligence
+    return cast(ResearchIntelligence, request.app.state.research_intelligence)
 
 
 @router.post("/documents", response_model=ResearchDocument, status_code=201)
