@@ -1,0 +1,90 @@
+name: Verify concurrent workspace idempotency (temporary)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  concurrent-idempotency:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE: https://colab-api-rqoh.onrender.com
+    steps:
+      - name: Wait for production deployment
+        run: sleep 75
+      - name: Exercise concurrent create
+        run: |
+          python - <<'PY'
+          import concurrent.futures
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          import uuid
+
+          base = os.environ["API_BASE"].rstrip("/")
+          marker = f"concurrent-idempotency-main-{uuid.uuid4().hex}"
+          payload = json.dumps({
+              "name": marker,
+              "product_goal": "concurrent idempotency production verification",
+              "priority": 777,
+              "strategies": [],
+          }).encode()
+
+          def create(_):
+              req = urllib.request.Request(
+                  f"{base}/api/workspaces",
+                  data=payload,
+                  method="POST",
+                  headers={
+                      "Accept": "application/json",
+                      "Content-Type": "application/json",
+                      "Idempotency-Key": marker,
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as exc:
+                  return exc.code, exc.read().decode()
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+              results = list(pool.map(create, range(12)))
+
+          statuses = [status for status, _ in results]
+          if statuses != [201] * 12:
+              raise AssertionError(f"unexpected statuses: {statuses}; results={results}")
+          ids = [body["workspace_id"] for _, body in results]
+          if len(set(ids)) != 1:
+              raise AssertionError(f"concurrent idempotency violation: workspace IDs={ids}")
+
+          workspace_id = ids[0]
+          print(f"CONCURRENT IDEMPOTENCY PASS: 12 concurrent requests converged on {workspace_id}")
+
+          req = urllib.request.Request(f"{base}/api/workspaces/{workspace_id}", headers={"Accept": "application/json"})
+          with urllib.request.urlopen(req, timeout=90) as response:
+              current = json.load(response)
+          version = current["version"]
+          if current["status"] != "archived":
+              archive = urllib.request.Request(
+                  f"{base}/api/workspaces/{workspace_id}/archive",
+                  data=json.dumps({"version": version}).encode(),
+                  method="POST",
+                  headers={"Accept": "application/json", "Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(archive, timeout=90) as response:
+                  current = json.load(response)
+              version = current["version"]
+          delete = urllib.request.Request(
+              f"{base}/api/workspaces/{workspace_id}",
+              data=json.dumps({"version": version}).encode(),
+              method="DELETE",
+              headers={"Accept": "application/json", "Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(delete, timeout=90) as response:
+              assert response.status == 204
+          print("CLEANUP PASS: test workspace deleted")
+          PY
