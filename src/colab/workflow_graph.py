@@ -8,6 +8,7 @@ interrupt without moving policy decisions into an LLM.
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -115,7 +116,7 @@ class WorkflowGraph:
             Stage.RESEARCH,
             Stage.STRATEGY,
         ]
-        for current, following in zip(ordered, ordered[1:]):
+        for current, following in pairwise(ordered):
             builder.add_edge(current.value, following.value)
 
         builder.add_conditional_edges(
