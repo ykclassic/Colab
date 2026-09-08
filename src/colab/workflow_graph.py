@@ -30,14 +30,21 @@ class WorkflowGraph:
     def __init__(self, orchestrator: Orchestrator | None = None) -> None:
         self._orchestrator = orchestrator or Orchestrator()
 
-    def _advance(self, state: WorkflowGraphState) -> WorkflowGraphState:
+    @staticmethod
+    def _workflow(state: WorkflowGraphState) -> WorkflowState:
         workflow = state["workflow"]
+        if isinstance(workflow, WorkflowState):
+            return workflow
+        return WorkflowState.model_validate(workflow)
+
+    def _advance(self, state: WorkflowGraphState) -> WorkflowGraphState:
+        workflow = self._workflow(state)
         self._orchestrator.advance(workflow)
         return {"workflow": workflow}
 
     @staticmethod
     def _human_review(state: WorkflowGraphState) -> WorkflowGraphState:
-        workflow = state["workflow"]
+        workflow = WorkflowGraph._workflow(state)
         if not workflow.final_package:
             raise WorkflowError("Human review requires a final package")
         decision = interrupt(
@@ -58,21 +65,21 @@ class WorkflowGraph:
 
     @staticmethod
     def _complete(state: WorkflowGraphState) -> WorkflowGraphState:
-        workflow = state["workflow"]
+        workflow = WorkflowGraph._workflow(state)
         workflow.current_stage = Stage.COMPLETE
         workflow.record("workflow_completed", "orchestrator", "human approval accepted")
         return {"workflow": workflow}
 
     @staticmethod
     def _reject(state: WorkflowGraphState) -> WorkflowGraphState:
-        workflow = state["workflow"]
+        workflow = WorkflowGraph._workflow(state)
         workflow.current_stage = Stage.REJECTED
         workflow.record("workflow_rejected", "human", "workflow rejected")
         return {"workflow": workflow}
 
     @staticmethod
     def _route_after_risk(state: WorkflowGraphState) -> str:
-        stage = state["workflow"].current_stage
+        stage = WorkflowGraph._workflow(state).current_stage
         if stage is Stage.IMPLEMENTATION:
             return Stage.IMPLEMENTATION.value
         if stage is Stage.STRATEGY:
@@ -83,7 +90,7 @@ class WorkflowGraph:
 
     @staticmethod
     def _route_after_human_review(state: WorkflowGraphState) -> str:
-        workflow = state["workflow"]
+        workflow = WorkflowGraph._workflow(state)
         return (
             Stage.COMPLETE.value
             if workflow.approvals[-1]["decision"] == Decision.APPROVE.value
