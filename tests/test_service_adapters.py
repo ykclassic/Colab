@@ -14,6 +14,19 @@ from colab.service_adapters import (
 )
 
 
+class FakeLifecycleStore:
+    def __init__(self, store: FakeStore) -> None:
+        self.store = store
+
+    def submit(self, workspace, idempotency_key=None): return workspace
+    def get(self, workspace_id): return self.store.workspace
+    def list(self, include_archived=False): return [self.store.workspace]
+    def update(self, workspace_id, expected_version, **kwargs): return self.store.workspace
+    def archive(self, workspace_id, expected_version): return self.store.workspace
+    def restore(self, workspace_id, expected_version): return self.store.workspace
+    def delete(self, workspace_id, expected_version): return None
+
+
 class FakeStore:
     def __init__(self) -> None:
         self.workspace = Workspace(name="w", product_goal="goal")
@@ -41,9 +54,6 @@ class FakeStore:
             message="ok",
         )
 
-    def submit_workspace(self, workspace): return workspace
-    def get_workspace(self, workspace_id): return self.workspace
-    def list_workspaces(self): return [self.workspace]
     def put_artifact(self, artifact): return artifact
     def list_artifacts(self, workspace_id): return [self.artifact]
     def upsert_knowledge(self, document): return document
@@ -63,7 +73,7 @@ class FakeStore:
 
 def test_all_postgres_service_adapters_delegate() -> None:
     store = FakeStore()
-    workspace_service = PostgresWorkspaceManager(store)
+    workspace_service = PostgresWorkspaceManager(store, FakeLifecycleStore(store))
     artifact_service = PostgresArtifactStore(store)
     knowledge_service = PostgresKnowledgeBase(store)
     tool_service = PostgresToolRegistry(store)
