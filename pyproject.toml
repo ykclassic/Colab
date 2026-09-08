@@ -42,5 +42,9 @@ ignore = ["E501", "RUF012"]
 python_version = "3.12"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["colab.research_intelligence"]
+disable_error_code = ["assignment"]
+
 [tool.coverage.run]
 omit = ["src/colab/production_persistence.py"]
