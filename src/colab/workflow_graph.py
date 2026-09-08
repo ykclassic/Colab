@@ -37,10 +37,23 @@ class WorkflowGraph:
             return workflow
         return WorkflowState.model_validate(workflow)
 
-    def _advance(self, state: WorkflowGraphState) -> WorkflowGraphState:
+    def _advance(self, state: WorkflowGraphState, expected_stage: Stage) -> WorkflowGraphState:
         workflow = self._workflow(state)
+        if workflow.current_stage is not expected_stage:
+            raise WorkflowError(
+                f"Graph stage mismatch: expected {expected_stage.value}, "
+                f"got {workflow.current_stage.value}"
+            )
         self._orchestrator.advance(workflow)
-        return {"workflow": workflow}
+        return {"workflow": workflow.model_copy(deep=True)}
+
+    def _make_stage_node(self, stage: Stage) -> Any:
+        """Create a distinct runnable for each stage so state transitions are isolated."""
+
+        def advance_stage(state: WorkflowGraphState) -> WorkflowGraphState:
+            return self._advance(state, stage)
+
+        return advance_stage
 
     @staticmethod
     def _human_review(state: WorkflowGraphState) -> WorkflowGraphState:
@@ -61,21 +74,41 @@ class WorkflowGraph:
             raise WorkflowError("Human review decision must be approve or reject")
         workflow.approvals.append({"decision": value, "source": "human"})
         workflow.record("human_approval", "human", value)
-        return {"workflow": workflow}
+        return {"workflow": workflow.model_copy(deep=True)}
 
     @staticmethod
     def _complete(state: WorkflowGraphState) -> WorkflowGraphState:
         workflow = WorkflowGraph._workflow(state)
         workflow.current_stage = Stage.COMPLETE
         workflow.record("workflow_completed", "orchestrator", "human approval accepted")
-        return {"workflow": workflow}
+        return {"workflow": workflow.model_copy(deep=True)}
 
     @staticmethod
     def _reject(state: WorkflowGraphState) -> WorkflowGraphState:
         workflow = WorkflowGraph._workflow(state)
         workflow.current_stage = Stage.REJECTED
         workflow.record("workflow_rejected", "human", "workflow rejected")
-        return {"workflow": workflow}
+        return {"workflow": workflow.model_copy(deep=True)}
+
+    @staticmethod
+    def _route_from_start(state: WorkflowGraphState) -> str:
+        stage = WorkflowGraph._workflow(state).current_stage
+        routable = {
+            Stage.INTAKE,
+            Stage.DECOMPOSITION,
+            Stage.RESEARCH,
+            Stage.STRATEGY,
+            Stage.RISK,
+            Stage.IMPLEMENTATION,
+            Stage.VALIDATION,
+            Stage.SYNTHESIS,
+            Stage.HUMAN_REVIEW,
+            Stage.COMPLETE,
+            Stage.REJECTED,
+        }
+        if stage not in routable:
+            raise WorkflowError(f"Unsupported workflow stage: {stage.value}")
+        return stage.value
 
     @staticmethod
     def _route_after_risk(state: WorkflowGraphState) -> str:
@@ -100,7 +133,7 @@ class WorkflowGraph:
     def compile(self, *, checkpointer: Any = None) -> Any:
         """Compile the graph; pass a durable checkpointer for production execution."""
         builder: Any = StateGraph(WorkflowGraphState)
-        for stage in (
+        stages = (
             Stage.INTAKE,
             Stage.DECOMPOSITION,
             Stage.RESEARCH,
@@ -109,12 +142,18 @@ class WorkflowGraph:
             Stage.IMPLEMENTATION,
             Stage.VALIDATION,
             Stage.SYNTHESIS,
-        ):
-            builder.add_node(stage.value, self._advance)
+        )
+        for stage in stages:
+            builder.add_node(stage.value, self._make_stage_node(stage))
         builder.add_node(Stage.HUMAN_REVIEW.value, self._human_review)
         builder.add_node(Stage.COMPLETE.value, self._complete)
         builder.add_node(Stage.REJECTED.value, self._reject)
-        builder.add_edge(START, Stage.INTAKE.value)
+
+        builder.add_conditional_edges(
+            START,
+            self._route_from_start,
+            {stage.value: stage.value for stage in Stage},
+        )
 
         ordered = [
             Stage.INTAKE,
@@ -125,6 +164,7 @@ class WorkflowGraph:
         for current, following in pairwise(ordered):
             builder.add_edge(current.value, following.value)
 
+        builder.add_edge(Stage.STRATEGY.value, Stage.RISK.value)
         builder.add_conditional_edges(
             Stage.RISK.value,
             self._route_after_risk,
