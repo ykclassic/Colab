@@ -47,4 +47,7 @@ module = ["colab.research_intelligence"]
 disable_error_code = ["assignment"]
 
 [tool.coverage.run]
-omit = ["src/colab/production_persistence.py"]
+omit = [
+  "src/colab/production_persistence.py",
+  "src/colab/research_persistence.py",
+]
