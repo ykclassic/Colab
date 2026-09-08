@@ -1,0 +1,124 @@
+name: Verify Workspace Lifecycle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-workspace-lifecycle.yml'
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise production workspace lifecycle
+        env:
+          API_BASE: https://colab-api-rqoh.onrender.com
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          import uuid
+
+          base = os.environ["API_BASE"].rstrip("/")
+          marker = f"lifecycle-e2e-{os.environ['RUN_ID']}-{uuid.uuid4().hex[:8]}"
+          key = marker
+          workspace_id = None
+          version = None
+          status = None
+
+          def request(method, path, body=None, headers=None, expected=range(200, 300)):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(base + path, data=data, method=method)
+              req.add_header("Accept", "application/json")
+              if body is not None:
+                  req.add_header("Content-Type", "application/json")
+              for k, v in (headers or {}).items():
+                  req.add_header(k, v)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      raw = r.read().decode()
+                      parsed = json.loads(raw) if raw else None
+                      if r.status not in expected:
+                          raise AssertionError(f"{method} {path}: unexpected HTTP {r.status}: {raw}")
+                      print(f"PASS {method} {path} -> {r.status}")
+                      return r.status, parsed
+              except urllib.error.HTTPError as e:
+                  raw = e.read().decode()
+                  if e.code in expected:
+                      parsed = json.loads(raw) if raw else None
+                      print(f"PASS {method} {path} -> {e.code}")
+                      return e.code, parsed
+                  raise AssertionError(f"{method} {path}: HTTP {e.code}: {raw}")
+
+          try:
+              request("GET", "/ready")
+
+              payload = {
+                  "name": marker,
+                  "product_goal": "production lifecycle verification",
+                  "priority": 777,
+                  "strategies": [],
+              }
+              _, created = request("POST", "/api/workspaces", payload, {"Idempotency-Key": key}, expected=(201,))
+              workspace_id = created["workspace_id"]
+              version = created["version"]
+              assert created["name"] == marker
+
+              _, replayed = request("POST", "/api/workspaces", payload, {"Idempotency-Key": key}, expected=(201,))
+              assert replayed["workspace_id"] == workspace_id, "idempotency replay created a duplicate workspace"
+
+              _, fetched = request("GET", f"/api/workspaces/{workspace_id}")
+              assert fetched["workspace_id"] == workspace_id
+              version = fetched["version"]
+              status = fetched["status"]
+
+              _, updated = request("PATCH", f"/api/workspaces/{workspace_id}", {
+                  "version": version,
+                  "name": marker + "-edited",
+                  "product_goal": "production lifecycle verification edited",
+                  "priority": 778,
+                  "strategies": [],
+              })
+              assert updated["name"].endswith("-edited")
+              version = updated["version"]
+              status = updated["status"]
+
+              _, archived = request("POST", f"/api/workspaces/{workspace_id}/archive", {"version": version})
+              assert archived["status"] == "archived"
+              version = archived["version"]
+              status = archived["status"]
+
+              _, archived_read = request("GET", f"/api/workspaces/{workspace_id}")
+              assert archived_read["status"] == "archived"
+              assert archived_read["version"] == version
+
+              _, restored = request("POST", f"/api/workspaces/{workspace_id}/restore", {"version": version})
+              assert restored["status"] != "archived"
+              version = restored["version"]
+              status = restored["status"]
+
+              _, restored_read = request("GET", f"/api/workspaces/{workspace_id}")
+              assert restored_read["status"] != "archived"
+              assert restored_read["version"] == version
+
+              request("DELETE", f"/api/workspaces/{workspace_id}", {"version": version}, expected=(204,))
+              workspace_id = None
+              request("GET", f"/api/workspaces/{restored_read['workspace_id']}", expected=(404,))
+              print("WORKSPACE LIFECYCLE E2E: PASS")
+          finally:
+              if workspace_id:
+                  try:
+                      _, current = request("GET", f"/api/workspaces/{workspace_id}")
+                      current_version = current["version"]
+                      if current["status"] != "archived":
+                          _, current = request("POST", f"/api/workspaces/{workspace_id}/archive", {"version": current_version})
+                          current_version = current["version"]
+                      request("DELETE", f"/api/workspaces/{workspace_id}", {"version": current_version}, expected=(204,))
+                      print("CLEANUP: deleted test workspace")
+                  except Exception as exc:
+                      print(f"CLEANUP WARNING: {exc}")
+                      raise
+          PY
