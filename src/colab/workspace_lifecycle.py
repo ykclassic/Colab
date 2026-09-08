@@ -25,18 +25,56 @@ class WorkspaceLifecycleStore:
 
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
         with self._connection_factory() as conn, conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+            params = (
+                workspace.workspace_id,
+                workspace.name,
+                workspace.product_goal,
+                workspace.status,
+                workspace.priority,
+                Jsonb([strategy.model_dump(mode="json") for strategy in workspace.strategies]),
+                workspace.created_by,
+                workspace.version,
+                workspace.archived_at,
+                idempotency_key,
+                workspace.created_at,
+                workspace.updated_at,
+            )
+
             if idempotency_key:
-                cur.execute("SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s", (idempotency_key,))
-                existing = cur.fetchone()
-                if existing is not None:
-                    return Workspace.model_validate(existing)
-            cur.execute("""INSERT INTO public.product_workspaces
-                (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
-                (workspace.workspace_id, workspace.name, workspace.product_goal, workspace.status, workspace.priority,
-                 Jsonb([strategy.model_dump(mode="json") for strategy in workspace.strategies]), workspace.created_by,
-                 workspace.version, workspace.archived_at, idempotency_key, workspace.created_at, workspace.updated_at))
-            row = cur.fetchone()
+                # The unique partial index on create_idempotency_key is the
+                # serialization point. ON CONFLICT makes concurrent creates
+                # converge on one row instead of racing between SELECT/INSERT.
+                cur.execute(
+                    """INSERT INTO public.product_workspaces
+                        (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (create_idempotency_key) DO NOTHING
+                        RETURNING *""",
+                    params,
+                )
+                row = cur.fetchone()
+                if row is None:
+                    # At READ COMMITTED, this statement starts after a
+                    # concurrent conflicting insert has committed. A new
+                    # statement therefore sees the winning row.
+                    cur.execute(
+                        "SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s",
+                        (idempotency_key,),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        raise RuntimeError("idempotency conflict returned no existing workspace")
+                    return Workspace.model_validate(row)
+            else:
+                cur.execute(
+                    """INSERT INTO public.product_workspaces
+                        (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        RETURNING *""",
+                    params,
+                )
+                row = cur.fetchone()
+
             self._schedule(cur)
             if row is None:
                 raise RuntimeError("workspace insert returned no row")
