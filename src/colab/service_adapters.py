@@ -28,8 +28,8 @@ def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[
 
 
 class PostgresWorkspaceManager:
-    def __init__(self, store: PostgresPlatformStore) -> None:
-        self._store = WorkspaceLifecycleStore(store._connection_factory, store.max_concurrent)
+    def __init__(self, store: PostgresPlatformStore, lifecycle_store: WorkspaceLifecycleStore | None = None) -> None:
+        self._store = lifecycle_store or WorkspaceLifecycleStore(store._connection_factory, store.max_concurrent)
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace:
         return self._store.submit(workspace, idempotency_key)
     def get(self, workspace_id: UUID) -> Workspace:
