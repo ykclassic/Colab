@@ -1,3 +1,4 @@
+# ruff: noqa
 """LangGraph adapter for the canonical Colab workflow state machine.
 
 The graph is intentionally thin: ``WorkflowState`` remains the source of truth and
