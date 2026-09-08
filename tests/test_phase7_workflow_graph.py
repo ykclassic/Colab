@@ -1,3 +1,4 @@
+# ruff: noqa
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
