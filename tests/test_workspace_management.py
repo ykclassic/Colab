@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from colab.api import PlatformServices, create_app
 from colab.productization import Workspace, WorkspaceManager
+from colab.workspace_api import register_workspace_routes
 
 
 def test_in_memory_workspace_idempotency_and_lifecycle() -> None:
@@ -32,13 +33,14 @@ def test_in_memory_workspace_idempotency_and_lifecycle() -> None:
 
     restored = manager.restore(first.workspace_id, archived.version)
     assert restored.status == "running"
-    manager.archive(first.workspace_id, restored.version)
-    manager.delete(first.workspace_id, restored.version + 1)
+    archived_again = manager.archive(first.workspace_id, restored.version)
+    manager.delete(first.workspace_id, archived_again.version)
     assert manager.list(include_archived=True) == []
 
 
 def test_workspace_http_management_and_duplicate_post() -> None:
     app = create_app(PlatformServices(max_concurrent=2))
+    register_workspace_routes(app)
     client = TestClient(app)
     key = str(uuid4())
     payload = {"name": "HTTP workspace", "product_goal": "Test management"}
