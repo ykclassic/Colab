@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .productization import StrategySpec, Workspace
+from .research_api import router as research_router
+from .research_intelligence import ResearchIntelligence
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -75,5 +77,8 @@ def delete_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Req
 
 
 def register_workspace_routes(app: Any) -> None:
-    """Register lifecycle routes without coupling service composition to the router."""
+    """Register lifecycle and research routes after the application is composed."""
     app.include_router(router)
+    if not hasattr(app.state, "research_intelligence"):
+        app.state.research_intelligence = ResearchIntelligence()
+    app.include_router(research_router)
