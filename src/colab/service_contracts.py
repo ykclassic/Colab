@@ -1,7 +1,9 @@
 """Structural contracts shared by local and PostgreSQL service implementations."""
 from __future__ import annotations
 
-from typing import Protocol
+import builtins
+from collections.abc import Sequence
+from typing import Protocol, TypeAlias
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
@@ -13,18 +15,18 @@ from .productization import (
     Workspace,
 )
 
-WorkspaceList = list[Workspace]
-ArtifactList = list[ArtifactRecord]
-KnowledgeList = list[KnowledgeDocument]
-ToolList = list[ToolDefinition]
-EventList = list[OperationalEvent]
+WorkspaceList: TypeAlias = builtins.list[Workspace]
+ArtifactList: TypeAlias = builtins.list[ArtifactRecord]
+KnowledgeList: TypeAlias = builtins.list[KnowledgeDocument]
+ToolList: TypeAlias = builtins.list[ToolDefinition]
+EventList: TypeAlias = builtins.list[OperationalEvent]
 
 
 class WorkspaceService(Protocol):
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace: ...
     def get(self, workspace_id: UUID) -> Workspace: ...
     def list(self, include_archived: bool = False) -> WorkspaceList: ...
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace: ...
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace: ...
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
     def restore(self, workspace_id: UUID, expected_version: int) -> Workspace: ...
     def delete(self, workspace_id: UUID, expected_version: int) -> None: ...
