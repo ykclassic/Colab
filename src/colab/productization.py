@@ -229,10 +229,18 @@ class WorkspaceManager:
         queued = [item for item in self.list() if item.status == WorkspaceStatus.QUEUED]
         slots = max(0, self.max_concurrent - len(running))
         if running and queued:
-            for workspace in queued[:slots]:
-                workspace.status = WorkspaceStatus.RUNNING
+            highest_queued = queued[0]
+            lower_running = [item for item in running if item.priority < highest_queued.priority]
+            for workspace in lower_running[: min(len(queued), len(lower_running))]:
+                workspace.status = WorkspaceStatus.QUEUED
                 workspace.updated_at = datetime.now(UTC)
-        elif not running:
-            for workspace in queued[: self.max_concurrent]:
-                workspace.status = WorkspaceStatus.RUNNING
-                workspace.updated_at = datetime.now(UTC)
+            running = [item for item in running if item.status == WorkspaceStatus.RUNNING]
+            slots = max(0, self.max_concurrent - len(running))
+        for workspace in [item for item in self.list() if item.status == WorkspaceStatus.QUEUED][:slots]:
+            workspace.status = WorkspaceStatus.RUNNING
+            workspace.updated_at = datetime.now(UTC)
+
+
+def build_artifact(workspace_id: UUID, kind: str, producer: str, content: dict[str, Any]) -> ArtifactRecord:
+    canonical = repr(sorted(content.items())).encode("utf-8")
+    return ArtifactRecord(workspace_id=workspace_id, kind=kind, producer=producer, content=content, content_hash=sha256(canonical).hexdigest())
