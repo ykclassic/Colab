@@ -1,7 +1,7 @@
 """Advanced multi-agent collaboration primitives."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -98,7 +98,7 @@ class CollaborationResult:
 class CollaborationEngine:
     """Execute independent agent tasks concurrently and arbitrate conflicts."""
 
-    def __init__(self, agents: dict[AgentRole, Agent], max_workers: int = 4) -> None:
+    def __init__(self, agents: Mapping[AgentRole, Agent], max_workers: int = 4) -> None:
         if not agents:
             raise ValueError("at least one agent is required")
         if max_workers < 1 or max_workers > 32:
