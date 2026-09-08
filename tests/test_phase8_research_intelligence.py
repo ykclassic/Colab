@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from colab.api import create_app
+from colab.api import app
 from colab.research_intelligence import (
     DeterministicEmbeddingProvider,
     DocumentIngestionError,
@@ -66,7 +66,7 @@ def test_empty_document_is_rejected() -> None:
 
 
 def test_research_api_is_registered_and_operational() -> None:
-    client = TestClient(create_app())
+    client = TestClient(app)
     payload = {
         "title": "API source",
         "text": "Vector search should retrieve this evidence about factor models.",
