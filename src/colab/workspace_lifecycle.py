@@ -41,22 +41,21 @@ class WorkspaceLifecycleStore:
             )
 
             if idempotency_key:
-                # The unique partial index on create_idempotency_key is the
-                # serialization point. ON CONFLICT makes concurrent creates
-                # converge on one row instead of racing between SELECT/INSERT.
+                # The partial unique index is the database serialization point.
+                # Include its predicate in the conflict target so PostgreSQL can
+                # match the partial index and atomically collapse concurrent creates.
                 cur.execute(
                     """INSERT INTO public.product_workspaces
                         (workspace_id,name,product_goal,status,priority,strategies,created_by,version,archived_at,create_idempotency_key,created_at,updated_at)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (create_idempotency_key) DO NOTHING
+                        ON CONFLICT (create_idempotency_key) WHERE create_idempotency_key IS NOT NULL DO NOTHING
                         RETURNING *""",
                     params,
                 )
                 row = cur.fetchone()
                 if row is None:
-                    # At READ COMMITTED, this statement starts after a
-                    # concurrent conflicting insert has committed. A new
-                    # statement therefore sees the winning row.
+                    # At READ COMMITTED, this new statement sees the committed
+                    # winner after PostgreSQL resolved the conflicting insert.
                     cur.execute(
                         "SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s",
                         (idempotency_key,),
