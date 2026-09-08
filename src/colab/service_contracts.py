@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Sequence
-from typing import Protocol, TypeAlias
+from typing import Protocol
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
@@ -15,11 +15,11 @@ from .productization import (
     Workspace,
 )
 
-WorkspaceList: TypeAlias = builtins.list[Workspace]
-ArtifactList: TypeAlias = builtins.list[ArtifactRecord]
-KnowledgeList: TypeAlias = builtins.list[KnowledgeDocument]
-ToolList: TypeAlias = builtins.list[ToolDefinition]
-EventList: TypeAlias = builtins.list[OperationalEvent]
+type WorkspaceList = builtins.list[Workspace]
+type ArtifactList = builtins.list[ArtifactRecord]
+type KnowledgeList = builtins.list[KnowledgeDocument]
+type ToolList = builtins.list[ToolDefinition]
+type EventList = builtins.list[OperationalEvent]
 
 
 class WorkspaceService(Protocol):
