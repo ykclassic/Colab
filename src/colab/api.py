@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .collaboration_api import register_collaboration_routes
 from .operations import (
     EventLevel,
     ExecutionCoordinator,
@@ -139,8 +140,9 @@ class PlatformServices:
 
 def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
-    app = FastAPI(title="Colab Agent Platform", version="0.5.0")
+    app = FastAPI(title="Colab Agent Platform", version="0.6.0")
     app.state.services = services
+    register_collaboration_routes(app)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -273,7 +275,7 @@ input,textarea,button{font:inherit;padding:10px;border:1px solid #bbb;border-rad
 button{cursor:pointer;width:auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eee}
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
 </style></head><body>
-<h1>Colab Agent Platform</h1><p>Phase 4 adds leased execution coordination, retries, idempotency, and operational telemetry.</p>
+<h1>Colab Agent Platform</h1><p>Phase 9 adds parallel agent execution, delegation, typed communication, and deterministic conflict arbitration.</p>
 <div class="grid"><section class="card"><h2>New workspace</h2><input id="name" placeholder="Workspace name"><textarea id="goal" placeholder="Product goal"></textarea>
 <button onclick="createWorkspace()">Create workspace</button><p id="workspaceResult"></p></section>
 <section class="card"><h2>Operations</h2><div id="metrics">Loading…</div></section></div>
