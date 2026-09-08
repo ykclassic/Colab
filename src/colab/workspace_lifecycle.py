@@ -107,8 +107,11 @@ class WorkspaceLifecycleStore:
 
     def _schedule(self, cur: Any) -> None:
         cur.execute("SELECT pg_advisory_xact_lock(hashtext('colab:workspace:scheduler'))")
-        cur.execute("SELECT count(*) FROM public.product_workspaces WHERE status=%s", (WorkspaceStatus.RUNNING,))
-        running = int(cur.fetchone()[0])
+        cur.execute("SELECT count(*) AS count FROM public.product_workspaces WHERE status=%s", (WorkspaceStatus.RUNNING,))
+        running_row = cur.fetchone()
+        if running_row is None:
+            raise RuntimeError("scheduler count query returned no row")
+        running = int(running_row["count"])
         slots = max(0, self.max_concurrent - running)
         if slots:
             cur.execute("""UPDATE public.product_workspaces SET status=%s, updated_at=now()
@@ -122,4 +125,4 @@ class WorkspaceLifecycleStore:
         row = cur.fetchone()
         if row is None:
             raise KeyError(str(workspace_id))
-        raise RuntimeError(f"workspace version conflict: expected {expected_version}, current {row[0]}")
+        raise RuntimeError(f"workspace version conflict: expected {expected_version}, current {row['version']}")
