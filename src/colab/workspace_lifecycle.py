@@ -1,8 +1,9 @@
 """Durable workspace lifecycle operations with idempotency and optimistic concurrency."""
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
-from typing import Any, List
+from typing import Any
 from uuid import UUID
 
 from psycopg import Connection
@@ -50,7 +51,7 @@ class WorkspaceLifecycleStore:
             raise KeyError(str(workspace_id))
         return Workspace.model_validate(row)
 
-    def list(self, include_archived: bool = False) -> List[Workspace]:
+    def list(self, include_archived: bool = False) -> builtins.list[Workspace]:
         sql = "SELECT * FROM public.product_workspaces"
         if not include_archived:
             sql += " WHERE status <> %s"
