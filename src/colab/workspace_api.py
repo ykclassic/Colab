@@ -8,6 +8,9 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .productization import StrategySpec, Workspace
+from .research_api import router as research_router
+from .research_intelligence import ResearchIntelligence
+from .research_persistence import PostgresResearchIntelligenceStore
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -75,5 +78,11 @@ def delete_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Req
 
 
 def register_workspace_routes(app: Any) -> None:
-    """Register lifecycle routes without coupling service composition to the router."""
+    """Register lifecycle and research routes after the application is composed."""
     app.include_router(router)
+    if not hasattr(app.state, "research_intelligence"):
+        services = getattr(app.state, "services", None)
+        database = getattr(services, "database", None)
+        store = PostgresResearchIntelligenceStore(database._connection_factory) if database is not None else None
+        app.state.research_intelligence = ResearchIntelligence(store=store)
+    app.include_router(research_router)

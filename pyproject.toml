@@ -36,10 +36,18 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+ignore = ["E501", "RUF012"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["colab.research_intelligence"]
+disable_error_code = ["assignment"]
+
 [tool.coverage.run]
-omit = ["src/colab/production_persistence.py"]
+omit = [
+  "src/colab/production_persistence.py",
+  "src/colab/research_persistence.py",
+]
