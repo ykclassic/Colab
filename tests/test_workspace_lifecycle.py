@@ -53,7 +53,7 @@ def test_submit_get_and_list_paths() -> None:
 
     existing_store, existing_cursor = make_store([None, row])
     assert existing_store.submit(workspace, "same-key").workspace_id == workspace.workspace_id
-    assert "ON CONFLICT (create_idempotency_key) DO NOTHING" in existing_cursor.executed[0]
+    assert "ON CONFLICT (create_idempotency_key) WHERE create_idempotency_key IS NOT NULL DO NOTHING" in existing_cursor.executed[0]
     assert any("SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s" in sql for sql in existing_cursor.executed)
 
     inserted_store, inserted_cursor = make_store([row, {"count": 0}])
