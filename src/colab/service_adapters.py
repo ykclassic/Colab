@@ -1,8 +1,7 @@
 """Adapters that expose the existing service contracts over PostgreSQL."""
 from __future__ import annotations
 
-import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -40,10 +39,10 @@ class PostgresWorkspaceManager:
     def get(self, workspace_id: UUID) -> Workspace:
         return self._store.get(workspace_id)
 
-    def list(self, include_archived: bool = False) -> builtins.list[Workspace]:
+    def list(self, include_archived: bool = False) -> Sequence[Workspace]:
         return self._store.list(include_archived)
 
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
         return self._store.update(workspace_id, expected_version, name=name, product_goal=product_goal, priority=priority, strategies=strategies)
 
     def archive(self, workspace_id: UUID, expected_version: int) -> Workspace:
