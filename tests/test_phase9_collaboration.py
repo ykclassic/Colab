@@ -46,8 +46,13 @@ def test_dependency_cycle_is_rejected() -> None:
 def test_agent_to_agent_message_is_typed_and_auditable() -> None:
     e = engine()
     task_id = uuid4()
-    message = e.send(AgentRole.RESEARCHER, AgentRole.RISK, task_id, "challenge the evidence",
-                     MessageType.CHALLENGE)
+    message = e.send(
+        AgentRole.RESEARCHER,
+        AgentRole.RISK,
+        task_id,
+        "challenge the evidence",
+        MessageType.CHALLENGE,
+    )
     assert message.sender == AgentRole.RESEARCHER
     assert message.recipient == AgentRole.RISK
     assert e.messages() == (message,)
@@ -56,11 +61,18 @@ def test_agent_to_agent_message_is_typed_and_auditable() -> None:
 def test_conflict_arbitration_uses_explicit_scorer_and_confidence() -> None:
     e = engine()
     task_id = uuid4()
-    conflict = e.detect_conflict(task_id, {
-        AgentRole.RESEARCHER: "weak position",
-        AgentRole.STRATEGY: "strong position",
-    }, "agents disagree")
-    decision = e.arbitrate(conflict, lambda role, _: 10.0 if role == AgentRole.STRATEGY else 2.0)
+    conflict = e.detect_conflict(
+        task_id,
+        {
+            AgentRole.RESEARCHER: "weak position",
+            AgentRole.STRATEGY: "strong position",
+        },
+        "agents disagree",
+    )
+    decision = e.arbitrate(
+        conflict,
+        lambda role, _: 10.0 if role == AgentRole.STRATEGY else 2.0,
+    )
     assert decision.winner == AgentRole.STRATEGY
     assert decision.arbitrator == AgentRole.CEO
     assert decision.confidence > 0.8
@@ -76,6 +88,15 @@ def test_duplicate_task_ids_are_rejected() -> None:
 
 def test_unknown_dependency_is_rejected() -> None:
     e = engine()
-    task = e.delegate(AgentRole.RESEARCHER, "research", "research", dependencies=(uuid4(),))
+    task = e.delegate(
+        AgentRole.RESEARCHER,
+        "research",
+        "research",
+        dependencies=(uuid4(),),
+    )
     with pytest.raises(CollaborationError, match="unknown"):
         e.execute_parallel([task], state())
+
+
+def test_empty_task_set_is_a_noop() -> None:
+    assert engine().execute_parallel([], state()) == ()
