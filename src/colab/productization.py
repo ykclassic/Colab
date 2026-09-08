@@ -1,7 +1,7 @@
 """Phase 3 productization primitives: workspaces, artifacts, tools, and knowledge."""
 from __future__ import annotations
 
-import builtins
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -170,16 +170,16 @@ class WorkspaceManager:
         except KeyError as exc:
             raise KeyError(str(workspace_id)) from exc
 
-    def list(self, include_archived: bool = False) -> builtins.list[Workspace]:
+    def list(self, include_archived: bool = False) -> Sequence[Workspace]:
         items = self._workspaces.values() if include_archived else (item for item in self._workspaces.values() if item.status != WorkspaceStatus.ARCHIVED)
         return sorted(items, key=lambda item: (-item.priority, item.created_at))
 
-    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: list[StrategySpec]) -> Workspace:
+    def update(self, workspace_id: UUID, expected_version: int, *, name: str, product_goal: str, priority: int, strategies: Sequence[StrategySpec]) -> Workspace:
         workspace = self.get(workspace_id)
         self._check_version(workspace, expected_version)
         if workspace.status == WorkspaceStatus.ARCHIVED:
             raise ValueError("archived workspace cannot be edited")
-        workspace.name, workspace.product_goal, workspace.priority, workspace.strategies = name, product_goal, priority, strategies
+        workspace.name, workspace.product_goal, workspace.priority, workspace.strategies = name, product_goal, priority, list(strategies)
         workspace.version += 1
         workspace.updated_at = datetime.now(UTC)
         self._schedule()
