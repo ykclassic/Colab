@@ -7,10 +7,10 @@ from colab.llm_runtime import (
     BudgetExceeded,
     DeterministicModelProvider,
     ModelPolicy,
+    ModelProvider,
     ModelRequest,
     ModelResponse,
     ModelRuntime,
-    ModelProvider,
     StructuredOutputError,
 )
 
@@ -19,10 +19,6 @@ class Output(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: str
-
-
-def runtime(max_requests: int = 2) -> ModelRuntime:
-    return ModelRuntime({"deterministic": DeterministicModelProvider()})
 
 
 def test_runtime_validates_structured_output() -> None:
@@ -56,8 +52,7 @@ def test_runtime_rejects_invalid_structured_output() -> None:
 
 
 def test_runtime_enforces_hard_request_budget() -> None:
-    provider = DeterministicModelProvider()
-    runtime = ModelRuntime({"deterministic": provider})
+    runtime = ModelRuntime({"deterministic": DeterministicModelProvider()})
     policy = ModelPolicy(provider="deterministic", model="test", max_requests=1)
     request = ModelRequest(prompt="one")
     runtime.complete(request, policy)
