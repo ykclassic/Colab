@@ -1,0 +1,79 @@
+name: Verify Workspace Lifecycle via Curl
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-workspace-lifecycle-curl.yml'
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise production workspace lifecycle
+        env:
+          API_BASE: https://colab-api-rqoh.onrender.com
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, tempfile, uuid
+
+          base = os.environ['API_BASE'].rstrip('/')
+          marker = f"curl-lifecycle-e2e-{os.environ['RUN_ID']}-{uuid.uuid4().hex[:8]}"
+          workspace_id = None
+
+          def request(method, path, body=None, headers=None, expected=None):
+              expected = expected or set(range(200, 300))
+              with tempfile.NamedTemporaryFile() as out:
+                  cmd = ['curl', '-sS', '--max-time', '90', '-X', method, '-o', out.name, '-w', '%{http_code}', base + path]
+                  cmd += ['-H', 'Accept: application/json']
+                  if body is not None:
+                      cmd += ['-H', 'Content-Type: application/json', '--data', json.dumps(body)]
+                  for k, v in (headers or {}).items():
+                      cmd += ['-H', f'{k}: {v}']
+                  p = subprocess.run(cmd, capture_output=True, text=True)
+                  if p.returncode:
+                      raise RuntimeError(f'{method} {path}: curl exit {p.returncode}: {p.stderr}')
+                  code = int(p.stdout.strip())
+                  raw = out.read().decode()
+                  if code not in expected:
+                      raise AssertionError(f'{method} {path}: HTTP {code}: {raw}')
+                  data = json.loads(raw) if raw else None
+                  print(f'PASS {method} {path} -> {code}')
+                  return code, data
+
+          try:
+              request('GET', '/ready')
+              payload = {'name': marker, 'product_goal': 'production lifecycle verification', 'priority': 777, 'strategies': []}
+              _, created = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, {201})
+              workspace_id = created['workspace_id']
+              _, replay = request('POST', '/api/workspaces', payload, {'Idempotency-Key': marker}, {201})
+              assert replay['workspace_id'] == workspace_id
+              _, current = request('GET', f'/api/workspaces/{workspace_id}')
+              version = current['version']
+              _, updated = request('PATCH', f'/api/workspaces/{workspace_id}', {'version': version, 'name': marker + '-edited', 'product_goal': 'production lifecycle verification edited', 'priority': 778, 'strategies': []})
+              version = updated['version']
+              _, archived = request('POST', f'/api/workspaces/{workspace_id}/archive', {'version': version})
+              assert archived['status'] == 'archived'
+              version = archived['version']
+              _, archived_read = request('GET', f'/api/workspaces/{workspace_id}')
+              assert archived_read['status'] == 'archived' and archived_read['version'] == version
+              _, restored = request('POST', f'/api/workspaces/{workspace_id}/restore', {'version': version})
+              assert restored['status'] != 'archived'
+              version = restored['version']
+              _, restored_read = request('GET', f'/api/workspaces/{workspace_id}')
+              assert restored_read['version'] == version and restored_read['status'] != 'archived'
+              request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, {204})
+              workspace_id = None
+              request('GET', f'/api/workspaces/{restored_read["workspace_id"]}', expected={404})
+              print('WORKSPACE LIFECYCLE E2E: PASS')
+          finally:
+              if workspace_id:
+                  _, current = request('GET', f'/api/workspaces/{workspace_id}')
+                  version = current['version']
+                  if current['status'] != 'archived':
+                      _, current = request('POST', f'/api/workspaces/{workspace_id}/archive', {'version': version})
+                      version = current['version']
+                  request('DELETE', f'/api/workspaces/{workspace_id}', {'version': version}, {204})
+                  print('CLEANUP: deleted test workspace')
+          PY
