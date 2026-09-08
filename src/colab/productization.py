@@ -1,7 +1,6 @@
 """Phase 3 productization primitives: workspaces, artifacts, tools, and knowledge."""
 from __future__ import annotations
 
-import builtins
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
