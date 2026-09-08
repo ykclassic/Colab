@@ -8,7 +8,7 @@ interrupt without moving policy decisions into an LLM.
 
 from __future__ import annotations
 
-from typing import Callable, TypedDict
+from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -66,22 +66,32 @@ class WorkflowGraph:
     def _reject(state: WorkflowGraphState) -> WorkflowGraphState:
         workflow = state["workflow"]
         workflow.current_stage = Stage.REJECTED
-        workflow.record("workflow_rejected", "human", "human approval rejected")
+        workflow.record("workflow_rejected", "human", "workflow rejected")
         return {"workflow": workflow}
+
+    @staticmethod
+    def _route_after_risk(state: WorkflowGraphState) -> str:
+        stage = state["workflow"].current_stage
+        if stage is Stage.IMPLEMENTATION:
+            return Stage.IMPLEMENTATION.value
+        if stage is Stage.STRATEGY:
+            return Stage.STRATEGY.value
+        if stage is Stage.REJECTED:
+            return Stage.REJECTED.value
+        raise WorkflowError(f"Unexpected stage after risk review: {stage.value}")
 
     @staticmethod
     def _route_after_human_review(state: WorkflowGraphState) -> str:
         workflow = state["workflow"]
         return (
-            "complete"
+            Stage.COMPLETE.value
             if workflow.approvals[-1]["decision"] == Decision.APPROVE.value
-            else "rejected"
+            else Stage.REJECTED.value
         )
 
     def compile(self, *, checkpointer: object | None = None):
         """Compile the graph; pass a durable checkpointer for production execution."""
         builder = StateGraph(WorkflowGraphState)
-        nodes: dict[str, Callable[[WorkflowGraphState], WorkflowGraphState]] = {}
         for stage in (
             Stage.INTAKE,
             Stage.DECOMPOSITION,
@@ -92,10 +102,7 @@ class WorkflowGraph:
             Stage.VALIDATION,
             Stage.SYNTHESIS,
         ):
-            name = stage.value
-            nodes[name] = self._advance
-            builder.add_node(name, self._advance)
-
+            builder.add_node(stage.value, self._advance)
         builder.add_node(Stage.HUMAN_REVIEW.value, self._human_review)
         builder.add_node(Stage.COMPLETE.value, self._complete)
         builder.add_node(Stage.REJECTED.value, self._reject)
@@ -106,18 +113,29 @@ class WorkflowGraph:
             Stage.DECOMPOSITION,
             Stage.RESEARCH,
             Stage.STRATEGY,
-            Stage.RISK,
-            Stage.IMPLEMENTATION,
-            Stage.VALIDATION,
-            Stage.SYNTHESIS,
         ]
         for current, following in zip(ordered, ordered[1:]):
             builder.add_edge(current.value, following.value)
+
+        builder.add_conditional_edges(
+            Stage.RISK.value,
+            self._route_after_risk,
+            {
+                Stage.IMPLEMENTATION.value: Stage.IMPLEMENTATION.value,
+                Stage.STRATEGY.value: Stage.STRATEGY.value,
+                Stage.REJECTED.value: Stage.REJECTED.value,
+            },
+        )
+        builder.add_edge(Stage.IMPLEMENTATION.value, Stage.VALIDATION.value)
+        builder.add_edge(Stage.VALIDATION.value, Stage.SYNTHESIS.value)
         builder.add_edge(Stage.SYNTHESIS.value, Stage.HUMAN_REVIEW.value)
         builder.add_conditional_edges(
             Stage.HUMAN_REVIEW.value,
             self._route_after_human_review,
-            {"complete": Stage.COMPLETE.value, "rejected": Stage.REJECTED.value},
+            {
+                Stage.COMPLETE.value: Stage.COMPLETE.value,
+                Stage.REJECTED.value: Stage.REJECTED.value,
+            },
         )
         builder.add_edge(Stage.COMPLETE.value, END)
         builder.add_edge(Stage.REJECTED.value, END)
