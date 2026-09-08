@@ -9,7 +9,11 @@ from colab.workflow_graph import WorkflowGraph, WorkflowGraphState
 def _approved_state() -> WorkflowState:
     state = WorkflowState(product_goal="research")
     state.risk_assessments.append(
-        RiskAssessment(decision=Decision.APPROVE, findings=["bounded"], controls=["human review"])
+        RiskAssessment(
+            decision=Decision.APPROVE,
+            findings=["bounded"],
+            controls=["human review"],
+        )
     )
     state.final_package = {"summary": "validated"}
     return state
@@ -37,7 +41,9 @@ def test_graph_preserves_risk_rejection() -> None:
 
     result = graph.invoke(WorkflowGraphState(workflow=state))
     assert result["workflow"].current_stage is Stage.REJECTED
-    assert any(event.event_type == "risk_gate_blocked" for event in result["workflow"].audit_events)
+    assert any(
+        event.event_type == "risk_gate_blocked" for event in result["workflow"].audit_events
+    )
 
 
 def test_graph_requires_final_package_before_human_review() -> None:
