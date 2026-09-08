@@ -48,7 +48,7 @@ def test_submit_get_and_list_paths() -> None:
     workspace = Workspace(name="Alpha", product_goal="Goal")
     row = workspace_row(workspace)
 
-    store, _ = make_store([row, (0,)])
+    store, _ = make_store([row, {"count": 0}])
     assert store.submit(workspace).workspace_id == workspace.workspace_id
 
     existing_store, _ = make_store([row])
@@ -70,7 +70,7 @@ def test_update_archive_restore_and_delete_paths() -> None:
     workspace = Workspace(name="Alpha", product_goal="Goal")
     updated_row = workspace_row(workspace, status=WorkspaceStatus.RUNNING, version=2)
 
-    store, _ = make_store([updated_row, (0,)])
+    store, _ = make_store([updated_row, {"count": 0}])
     assert store.update(workspace.workspace_id, 1, name="Edited", product_goal="New goal", priority=10, strategies=[]).version == 2
 
     archived_row = workspace_row(workspace, status=WorkspaceStatus.ARCHIVED, version=3)
@@ -78,7 +78,7 @@ def test_update_archive_restore_and_delete_paths() -> None:
     assert archive_store.archive(workspace.workspace_id, 2).status == WorkspaceStatus.ARCHIVED
 
     restored_row = workspace_row(workspace, status=WorkspaceStatus.RUNNING, version=4)
-    restore_store, _ = make_store([restored_row, (0,)])
+    restore_store, _ = make_store([restored_row, {"count": 0}])
     assert restore_store.restore(workspace.workspace_id, 3).version == 4
 
     delete_row = workspace_row(workspace, status=WorkspaceStatus.ARCHIVED, version=5)
@@ -95,7 +95,7 @@ def test_version_and_state_conflicts() -> None:
         ("archive", {}),
         ("restore", {}),
     ]:
-        store, _ = make_store([None, (2,)])
+        store, _ = make_store([None, {"version": 2}])
         with pytest.raises(RuntimeError, match="version conflict"):
             getattr(store, method)(workspace.workspace_id, 1, **args)
 
@@ -111,13 +111,13 @@ def test_version_and_state_conflicts() -> None:
     with pytest.raises(RuntimeError, match="version conflict"):
         stale_store.delete(workspace.workspace_id, 1)
 
-    missing_insert_store, _ = make_store([None, (0,)])
+    missing_insert_store, _ = make_store([None, {"count": 0}])
     with pytest.raises(RuntimeError, match="insert returned no row"):
         missing_insert_store.submit(workspace)
 
 
 def test_scheduler_respects_concurrency() -> None:
-    store, cursor = make_store([(0,)])
+    store, cursor = make_store([{"count": 0}])
     store._schedule(cursor)
     assert any("pg_advisory_xact_lock" in sql for sql in cursor.executed)
 
