@@ -1,8 +1,8 @@
-import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from colab.contracts import Decision, RiskAssessment, Stage, WorkflowState
+from colab.orchestrator import WorkflowError
 from colab.workflow_graph import WorkflowGraph, WorkflowGraphState
 
 
@@ -52,5 +52,9 @@ def test_graph_requires_final_package_before_human_review() -> None:
     state.risk_assessments.append(RiskAssessment(decision=Decision.APPROVE))
     state.current_stage = Stage.SYNTHESIS
 
-    with pytest.raises(Exception):
+    try:
         graph.invoke(WorkflowGraphState(workflow=state))
+    except WorkflowError as exc:
+        assert str(exc) == "Human review requires a final package"
+    else:
+        raise AssertionError("human review proceeded without a final package")
