@@ -9,10 +9,9 @@ interrupt without moving policy decisions into an LLM.
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 
 from .contracts import Decision, Stage, WorkflowState
@@ -91,7 +90,7 @@ class WorkflowGraph:
             else Stage.REJECTED.value
         )
 
-    def compile(self, *, checkpointer: object | None = None) -> CompiledStateGraph:
+    def compile(self, *, checkpointer: object | None = None) -> Any:
         """Compile the graph; pass a durable checkpointer for production execution."""
         builder = StateGraph(WorkflowGraphState)
         for stage in (
