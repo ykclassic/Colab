@@ -51,8 +51,14 @@ def test_submit_get_and_list_paths() -> None:
     store, _ = make_store([row, {"count": 0}])
     assert store.submit(workspace).workspace_id == workspace.workspace_id
 
-    existing_store, _ = make_store([row])
+    existing_store, existing_cursor = make_store([None, row])
     assert existing_store.submit(workspace, "same-key").workspace_id == workspace.workspace_id
+    assert "ON CONFLICT (create_idempotency_key) DO NOTHING" in existing_cursor.executed[0]
+    assert any("SELECT * FROM public.product_workspaces WHERE create_idempotency_key=%s" in sql for sql in existing_cursor.executed)
+
+    inserted_store, inserted_cursor = make_store([row, {"count": 0}])
+    assert inserted_store.submit(workspace, "new-key").workspace_id == workspace.workspace_id
+    assert sum("pg_advisory_xact_lock" in sql for sql in inserted_cursor.executed) == 1
 
     get_store, _ = make_store([row])
     assert get_store.get(workspace.workspace_id).workspace_id == workspace.workspace_id
@@ -64,6 +70,13 @@ def test_submit_get_and_list_paths() -> None:
     list_store, _ = make_store(rows=[row])
     assert len(list_store.list()) == 1
     assert len(list_store.list(include_archived=True)) == 1
+
+
+def test_idempotency_conflict_without_winner_is_an_error() -> None:
+    workspace = Workspace(name="Alpha", product_goal="Goal")
+    store, _ = make_store([None, None])
+    with pytest.raises(RuntimeError, match="idempotency conflict"):
+        store.submit(workspace, "same-key")
 
 
 def test_update_archive_restore_and_delete_paths() -> None:
