@@ -49,16 +49,16 @@ def test_complete_research_vertical_slice_is_evidence_backed() -> None:
 
 def test_vertical_slice_is_reproducible_for_identical_inputs() -> None:
     workspace = uuid4()
-    kwargs = dict(
-        workspace_id=workspace,
-        dataset_name="rates",
-        source_uri="https://example.test/rates.txt",
-        title="Rates",
-        content=b"Central bank policy tightened as inflation declined.",
-        media_type="text/plain",
-        filename="rates.txt",
-        query="central bank inflation policy",
-    )
+    kwargs = {
+        "workspace_id": workspace,
+        "dataset_name": "rates",
+        "source_uri": "https://example.test/rates.txt",
+        "title": "Rates",
+        "content": b"Central bank policy tightened as inflation declined.",
+        "media_type": "text/plain",
+        "filename": "rates.txt",
+        "query": "central bank inflation policy",
+    }
     first = _pipeline().run(**kwargs)
     second = _pipeline().run(**kwargs)
     assert first.reproducibility_hash == second.reproducibility_hash
@@ -89,11 +89,10 @@ def test_workspace_isolation_and_persistent_shape() -> None:
     assert store.list(first_workspace)[0].workspace_id != store.list(second_workspace)[0].workspace_id
 
 
-def test_fabricated_citation_cannot_become_a_report() -> None:
-    pipeline = _pipeline()
-    run = pipeline.run(
+def test_report_contains_only_validated_citations() -> None:
+    run = _pipeline().run(
         workspace_id=uuid4(), dataset_name="source", source_uri="https://example.test/source",
         title="Source", content=b"real evidence", media_type="text/plain", query="real evidence",
     )
-    assert all(item.valid for item in run.validations)
     assert run.report.citations
+    assert all(item.valid for item in run.validations)
