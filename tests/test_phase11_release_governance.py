@@ -3,7 +3,14 @@ from uuid import uuid4
 import pytest
 
 from colab.regression import RegressionCase, RegressionError, RegressionSuite
-from colab.release_governance import GateResult, GovernanceError, ReadinessReport, ReleaseGovernance, ReproducibilityManifest, StrategyVersion
+from colab.release_governance import (
+    GateResult,
+    GovernanceError,
+    ReadinessReport,
+    ReleaseGovernance,
+    ReproducibilityManifest,
+    StrategyVersion,
+)
 
 
 WORKSPACE_ID = uuid4()
