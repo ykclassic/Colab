@@ -56,12 +56,12 @@ CREATE POLICY research_datasets_workspace ON public.research_datasets
     FOR ALL USING (public.is_workspace_member(workspace_id)) WITH CHECK (public.is_workspace_member(workspace_id));
 DROP POLICY IF EXISTS research_extractions_workspace ON public.research_extractions;
 CREATE POLICY research_extractions_workspace ON public.research_extractions
-    FOR ALL USING (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = dataset_id AND public.is_workspace_member(d.workspace_id)))
-    WITH CHECK (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = dataset_id AND public.is_workspace_member(d.workspace_id)));
+    FOR ALL USING (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = research_extractions.dataset_id AND public.is_workspace_member(d.workspace_id)))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = research_extractions.dataset_id AND public.is_workspace_member(d.workspace_id)));
 DROP POLICY IF EXISTS research_platform_chunks_workspace ON public.research_platform_chunks;
 CREATE POLICY research_platform_chunks_workspace ON public.research_platform_chunks
-    FOR ALL USING (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = dataset_id AND public.is_workspace_member(d.workspace_id)))
-    WITH CHECK (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = dataset_id AND public.is_workspace_member(d.workspace_id)));
+    FOR ALL USING (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = research_platform_chunks.dataset_id AND public.is_workspace_member(d.workspace_id)))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.research_datasets d WHERE d.dataset_id = research_platform_chunks.dataset_id AND public.is_workspace_member(d.workspace_id)));
 
 -- Platform records are lineage-bearing and should be replaced by new versions rather than mutated.
 CREATE OR REPLACE FUNCTION public.prevent_research_platform_mutation() RETURNS trigger
