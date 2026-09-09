@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from colab.api import PlatformServices, create_app
 from colab.security import (
     Permission,
     PlatformRole,
@@ -21,6 +22,7 @@ from colab.security import (
     require_permission,
     require_workspace_membership,
 )
+from colab.workspace_api import register_workspace_routes
 
 
 def _token(secret: str, user_id: UUID, role: str) -> str:
@@ -65,8 +67,9 @@ def test_authentication_edge_cases_and_test_auth_gate(monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("COLAB_JWT_SECRET", "test-secret")
-    token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS256", headers={"alg": "RS256"})
-    with pytest.raises(ValueError, match="unsupported local JWT algorithm"):
+    token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS384")
+    monkeypatch.delenv("COLAB_JWT_SECRET")
+    with pytest.raises(ValueError, match="invalid or expired"):
         authenticate_bearer(token)
 
     monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "false")
@@ -169,3 +172,33 @@ def test_workspace_authorization_denies_role_without_permission() -> None:
 
     client = TestClient(app)
     assert client.get(f"/api/workspaces/{uuid4()}").status_code == 403
+
+
+def test_workspace_http_error_paths_and_secure_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
+    user_id = str(uuid4())
+    app = create_app(PlatformServices(max_concurrent=2))
+    register_workspace_routes(app)
+    client = TestClient(app)
+    headers = {"X-Test-User": user_id, "X-Test-Role": "owner"}
+
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
+    assert client.get("/api/workspaces", headers=headers).json() == []
+    assert client.post("/api/workspaces", json={"name": "Protected", "product_goal": "Coverage"}, headers={**headers, "Idempotency-Key": str(uuid4())}).status_code == 201
+    listed = client.get("/api/workspaces", headers=headers)
+    assert listed.status_code == 200
+    workspace = listed.json()[0]
+    workspace_id = workspace["workspace_id"]
+
+    stale = client.patch(f"/api/workspaces/{workspace_id}", json={"version": 99, "name": "stale", "product_goal": "stale", "priority": 1, "strategies": []}, headers=headers)
+    assert stale.status_code == 409
+    assert client.patch(f"/api/workspaces/{uuid4()}", json={"version": 1, "name": "missing", "product_goal": "missing", "priority": 1, "strategies": []}, headers=headers).status_code == 404
+    assert client.post(f"/api/workspaces/{uuid4()}/archive", json={"version": 1}, headers=headers).status_code == 404
+    assert client.post(f"/api/workspaces/{uuid4()}/restore", json={"version": 1}, headers=headers).status_code == 404
+    assert client.delete(f"/api/workspaces/{uuid4()}", json={"version": 1}, headers=headers).status_code == 404
+
+    archived = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": workspace["version"]}, headers=headers)
+    assert archived.status_code == 200
+    assert client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": archived.json()["version"]}, headers=headers).status_code == 409
+    restored = client.post(f"/api/workspaces/{workspace_id}/restore", json={"version": archived.json()["version"]}, headers=headers)
+    assert restored.status_code == 200
