@@ -62,7 +62,7 @@ def test_promotion_binds_workspace_and_blocks_missing_gate_and_low_score() -> No
         artifact_digest="a" * 64, manifest_hash="b" * 64,
     )
     governance.register_version(version)
-    gate = GateResult(gate="reproducibility", passed=True, score=100)
+    gate = GateResult(gate="reproducibility", passed=True, score=0)
     decision = governance.promote(version.version_id, "candidate", "staging", (gate,))
     assert decision.approved is False
     assert any("missing required gate" in reason for reason in decision.reasons)
