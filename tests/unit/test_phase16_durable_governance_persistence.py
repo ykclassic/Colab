@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Self
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from colab.durable_governance import DurableGovernance
 from colab.release_governance import GateResult, StrategyVersion
