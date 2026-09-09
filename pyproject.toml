@@ -43,6 +43,7 @@ ignore = ["E501", "RUF012"]
 "src/colab/api.py" = ["I001"]
 "src/colab/research_platform_api.py" = ["I001"]
 "tests/unit/test_phase21b_database_integrity.py" = ["I001"]
+"tests/unit/test_phase21c_database_governance_integrity.py" = ["I001"]
 
 [tool.mypy]
 python_version = "3.12"
