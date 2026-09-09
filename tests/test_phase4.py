@@ -1,10 +1,9 @@
-# ruff: noqa: I001,E701,E702
+# ruff: noqa: I001
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-
 from colab.api import PlatformServices, create_app
 from colab.operations import EventLevel, ExecutionCoordinator, ExecutionStatus, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
 
