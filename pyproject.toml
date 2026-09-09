@@ -40,6 +40,8 @@ ignore = ["E501", "RUF012"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/colab/quant_lab.py" = ["F401"]
+"src/colab/api.py" = ["I001"]
+"src/colab/research_platform_api.py" = ["I001"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -55,4 +57,6 @@ omit = [
   "src/colab/research_persistence.py",
   "src/colab/durable_governance.py",
   "src/colab/release_governance_api.py",
+  "src/colab/research_platform_persistence.py",
+  "src/colab/research_platform_api.py",
 ]
