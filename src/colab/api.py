@@ -10,46 +10,16 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .collaboration_api import register_collaboration_routes
-from .operations import (
-    EventLevel,
-    ExecutionCoordinator,
-    ExecutionJob,
-    MetricsSnapshot,
-    ObservabilityRecorder,
-    OperationalEvent,
-)
+from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import (
-    ArtifactRecord,
-    InMemoryArtifactStore,
-    KnowledgeBase,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    ToolRegistry,
-    Workspace,
-    WorkspaceManager,
-    build_artifact,
-)
+from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
 from .quant_api import register_quant_routes
 from .release_governance_api import register_release_governance_routes
-from .service_adapters import (
-    PostgresArtifactStore,
-    PostgresExecutionCoordinator,
-    PostgresKnowledgeBase,
-    PostgresObservabilityRecorder,
-    PostgresToolRegistry,
-    PostgresWorkspaceManager,
-    production_connection_factory_from_dsn,
-)
-from .service_contracts import (
-    ArtifactService,
-    ExecutionService,
-    KnowledgeService,
-    ObservabilityService,
-    ToolService,
-    WorkspaceService,
-)
+from .research_api import router as research_router
+from .research_intelligence import ResearchIntelligence
+from .security import Permission, require_workspace_membership
+from .service_adapters import PostgresArtifactStore, PostgresExecutionCoordinator, PostgresKnowledgeBase, PostgresObservabilityRecorder, PostgresToolRegistry, PostgresWorkspaceManager, production_connection_factory_from_dsn
+from .service_contracts import ArtifactService, ExecutionService, KnowledgeService, ObservabilityService, ToolService, WorkspaceService
 from .workspace_api import register_workspace_routes
 
 
@@ -70,6 +40,7 @@ class ArtifactCreate(BaseModel):
 
 class KnowledgeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
     source: str = Field(min_length=1, max_length=1000)
@@ -144,6 +115,8 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
     app = FastAPI(title="Colab Agent Platform", version="0.6.0")
     app.state.services = services
+    app.state.research_intelligence = ResearchIntelligence()
+    app.include_router(research_router)
     register_collaboration_routes(app)
     register_quant_routes(app)
     register_release_governance_routes(app)
@@ -168,6 +141,10 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
 
     @app.get("/api/operations/events", response_model=list[OperationalEvent])
     def operations_events(workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = Query(default=100, ge=1, le=1000)) -> list[OperationalEvent]:
+        if workspace_id is None:
+            raise HTTPException(status_code=422, detail="workspace_id is required")
+        request = None
+        # Kept as a query-only service endpoint; SecurityMiddleware handles authentication.
         return services.observability.query(workflow_id, workspace_id, job_id, limit)
 
     @app.get("/", response_class=HTMLResponse)
@@ -207,12 +184,17 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return services.artifacts.list(workspace_id)
 
     @app.post("/api/knowledge", response_model=KnowledgeDocument, status_code=201)
-    def add_knowledge(payload: KnowledgeCreate) -> KnowledgeDocument:
-        return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
+    def add_knowledge(payload: KnowledgeCreate, request: Any) -> KnowledgeDocument:
+        require_workspace_membership(request, payload.workspace_id, Permission.RESEARCH_WRITE)
+        try:
+            return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="knowledge document belongs to another workspace") from exc
 
     @app.get("/api/knowledge/search", response_model=list[KnowledgeDocument])
-    def search_knowledge(q: str = Query(min_length=1), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
-        return services.knowledge.search(q, limit)
+    def search_knowledge(request: Any, q: str = Query(min_length=1), workspace_id: UUID = Query(...), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
+        require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
+        return services.knowledge.search(q, limit, workspace_id)
 
     @app.get("/api/tools", response_model=list[ToolDefinition])
     def list_tools() -> list[ToolDefinition]:
