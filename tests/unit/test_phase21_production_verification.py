@@ -1,7 +1,6 @@
 """Phase 21 production verification: authentication and tenant-bound API boundaries."""
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest
@@ -28,37 +27,35 @@ def test_api_requires_authentication() -> None:
     assert response.status_code == 401
 
 
-def test_authenticated_user_cannot_access_unknown_workspace() -> None:
+def test_workspace_mutation_requires_write_permission() -> None:
     client = _client()
-    response = client.get(
-        "/api/agents/registry/00000000-0000-0000-0000-000000000001",
+    workspace_id = uuid4()
+    response = client.patch(
+        f"/api/workspaces/{workspace_id}",
         headers={"X-Test-User": str(uuid4()), "X-Test-Role": "reviewer"},
+        json={"version": 1, "name": "x", "product_goal": "y"},
     )
-    assert response.status_code == 200
-    assert response.json() == []
+    assert response.status_code == 403
 
 
 def test_collaboration_request_is_workspace_bound() -> None:
-    fields = {
-        "product_goal": "test",
-        "tasks": [],
-    }
+    fields = {"product_goal": "test", "tasks": []}
     with pytest.raises(Exception):
         CollaborationRunRequest.model_validate(fields)
 
 
 def test_quant_request_is_workspace_bound() -> None:
-    fields = {
-        "symbol": "TEST",
-        "bars": [],
-    }
+    fields = {"symbol": "TEST", "bars": []}
     with pytest.raises(Exception):
         QuantRunRequest.model_validate(fields)
 
 
-def test_authentication_headers_are_not_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_test_auth_header_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COLAB_REQUIRE_AUTH", "true")
     monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "false")
     client = _client()
-    response = client.get("/api/auth/me")
+    response = client.get(
+        "/api/auth/me",
+        headers={"X-Test-User": str(uuid4()), "X-Test-Role": "owner"},
+    )
     assert response.status_code == 401
