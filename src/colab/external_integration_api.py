@@ -20,16 +20,18 @@ def register_external_integration_routes(app: Any, registry: ExternalIntegration
 
     @router.get("")
     def list_integrations() -> list[dict[str, object]]:
-        return [
-            {
-                "name": item.name,
-                "base_url": item.base_url,
-                "allowed_paths": list(item.allowed_paths),
-                "description": item.description,
-                "read_only": True,
-            }
-            for item in registry.list()
-        ]
+        records: list[dict[str, object]] = []
+        for item in registry.list_connectors():
+            records.append(
+                {
+                    "name": item.name,
+                    "base_url": item.base_url,
+                    "allowed_paths": list(item.allowed_paths),
+                    "description": item.description,
+                    "read_only": True,
+                }
+            )
+        return records
 
     @router.post("/{connector}/fetch")
     def fetch_integration(connector: str, payload: ExternalFetchRequest) -> dict[str, object]:
@@ -45,18 +47,20 @@ def register_external_integration_routes(app: Any, registry: ExternalIntegration
             registry.get(connector)
         except ExternalIntegrationError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return [
-            {
-                "request_id": str(item.request_id),
-                "connector": item.connector,
-                "path": item.path,
-                "status_code": item.status_code,
-                "success": item.success,
-                "timestamp": item.timestamp.isoformat(),
-                "error": item.error,
-            }
-            for item in registry.audit()
-            if item.connector == connector
-        ][-limit:]
+        records: list[dict[str, object]] = []
+        for item in registry.audit():
+            if item.connector == connector:
+                records.append(
+                    {
+                        "request_id": str(item.request_id),
+                        "connector": item.connector,
+                        "path": item.path,
+                        "status_code": item.status_code,
+                        "success": item.success,
+                        "timestamp": item.timestamp.isoformat(),
+                        "error": item.error,
+                    }
+                )
+        return records[-limit:]
 
     app.include_router(router)
