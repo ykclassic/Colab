@@ -7,10 +7,13 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from .external_integration import ExternalIntegrationRegistry
+from .external_integration_api import register_external_integration_routes
 from .productization import StrategySpec, Workspace
 from .research_api import router as research_router
 from .research_intelligence import ResearchIntelligence
 from .research_persistence import PostgresResearchIntelligenceStore
+from .security import SecurityMiddleware
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -78,7 +81,7 @@ def delete_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Req
 
 
 def register_workspace_routes(app: Any) -> None:
-    """Register lifecycle and research routes after the application is composed."""
+    """Register lifecycle/research routes and Phase 13 security boundaries."""
     app.include_router(router)
     if not hasattr(app.state, "research_intelligence"):
         services = getattr(app.state, "services", None)
@@ -86,3 +89,11 @@ def register_workspace_routes(app: Any) -> None:
         store = PostgresResearchIntelligenceStore(database._connection_factory) if database is not None else None
         app.state.research_intelligence = ResearchIntelligence(store=store)
     app.include_router(research_router)
+    if not hasattr(app.state, "external_integrations"):
+        app.state.external_integrations = ExternalIntegrationRegistry()
+        register_external_integration_routes(app, app.state.external_integrations)
+    if not any(middleware.cls is SecurityMiddleware for middleware in app.user_middleware):
+        app.add_middleware(
+            SecurityMiddleware,
+            requests_per_minute=int(__import__("os").getenv("COLAB_RATE_LIMIT_PER_MINUTE", "120")),
+        )
