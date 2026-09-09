@@ -2,7 +2,15 @@ from uuid import uuid4
 
 import pytest
 
-from colab.quant_platform import QuantPlatformError, monte_carlo, portfolio_risk, robustness_analysis, stress_test
+from colab.quant_platform import (
+    InMemoryStrategyRegistry,
+    QuantPlatformError,
+    StrategyRecord,
+    monte_carlo,
+    portfolio_risk,
+    robustness_analysis,
+    stress_test,
+)
 
 
 def test_risk_metrics_are_deterministic() -> None:
@@ -19,7 +27,7 @@ def test_stress_test_marks_large_negative_scenario() -> None:
 
 
 def test_monte_carlo_reproducible() -> None:
-    kwargs = dict(returns=[0.01, -0.005, 0.002], simulations=500, horizon=20, seed=7)
+    kwargs = {"returns": [0.01, -0.005, 0.002], "simulations": 500, "horizon": 20, "seed": 7}
     assert monte_carlo(**kwargs) == monte_carlo(**kwargs)
 
 
@@ -36,7 +44,6 @@ def test_monte_carlo_rejects_invalid_inputs() -> None:
 
 
 def test_strategy_registry_is_workspace_scoped() -> None:
-    from colab.quant_platform import InMemoryStrategyRegistry, StrategyRecord
     registry = InMemoryStrategyRegistry()
     workspace = uuid4()
     other = uuid4()
