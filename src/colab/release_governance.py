@@ -7,10 +7,11 @@ not deploy or execute trading activity.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, Mapping
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
