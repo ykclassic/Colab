@@ -5,7 +5,7 @@ import os
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,9 @@ from .productization import (
 )
 from .quant_api import register_quant_routes
 from .release_governance_api import register_release_governance_routes
+from .research_api import router as research_router
+from .research_intelligence import ResearchIntelligence
+from .security import Permission, require_workspace_membership
 from .service_adapters import (
     PostgresArtifactStore,
     PostgresExecutionCoordinator,
@@ -52,6 +55,10 @@ from .service_contracts import (
 )
 from .workspace_api import register_workspace_routes
 
+_KNOWLEDGE_QUERY = Query(min_length=1)
+_KNOWLEDGE_WORKSPACE = Query(...)
+_KNOWLEDGE_LIMIT = Query(default=10, ge=1, le=100)
+
 
 class WorkspaceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -70,6 +77,7 @@ class ArtifactCreate(BaseModel):
 
 class KnowledgeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
     source: str = Field(min_length=1, max_length=1000)
@@ -144,6 +152,8 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
     app = FastAPI(title="Colab Agent Platform", version="0.6.0")
     app.state.services = services
+    app.state.research_intelligence = ResearchIntelligence()
+    app.include_router(research_router)
     register_collaboration_routes(app)
     register_quant_routes(app)
     register_release_governance_routes(app)
@@ -168,6 +178,8 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
 
     @app.get("/api/operations/events", response_model=list[OperationalEvent])
     def operations_events(workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = Query(default=100, ge=1, le=1000)) -> list[OperationalEvent]:
+        if workspace_id is None:
+            raise HTTPException(status_code=422, detail="workspace_id is required")
         return services.observability.query(workflow_id, workspace_id, job_id, limit)
 
     @app.get("/", response_class=HTMLResponse)
@@ -207,12 +219,17 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return services.artifacts.list(workspace_id)
 
     @app.post("/api/knowledge", response_model=KnowledgeDocument, status_code=201)
-    def add_knowledge(payload: KnowledgeCreate) -> KnowledgeDocument:
-        return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
+    def add_knowledge(payload: KnowledgeCreate, request: Request) -> KnowledgeDocument:
+        require_workspace_membership(request, payload.workspace_id, Permission.RESEARCH_WRITE)
+        try:
+            return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="knowledge document belongs to another workspace") from exc
 
     @app.get("/api/knowledge/search", response_model=list[KnowledgeDocument])
-    def search_knowledge(q: str = Query(min_length=1), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
-        return services.knowledge.search(q, limit)
+    def search_knowledge(request: Request, q: str = _KNOWLEDGE_QUERY, workspace_id: UUID = _KNOWLEDGE_WORKSPACE, limit: int = _KNOWLEDGE_LIMIT) -> list[KnowledgeDocument]:
+        require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
+        return services.knowledge.search(q, limit, workspace_id)
 
     @app.get("/api/tools", response_model=list[ToolDefinition])
     def list_tools() -> list[ToolDefinition]:

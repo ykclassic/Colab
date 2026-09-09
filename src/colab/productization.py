@@ -60,6 +60,9 @@ class ArtifactRecord(BaseModel):
 class KnowledgeDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     document_id: UUID = Field(default_factory=uuid4)
+    # Nullable only for legacy rows during the migration. All API-created documents
+    # are required to carry an explicit workspace_id and are authorized before access.
+    workspace_id: UUID | None = None
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
     source: str = Field(min_length=1, max_length=1000)
@@ -107,11 +110,13 @@ class KnowledgeBase:
     def upsert(self, document: KnowledgeDocument) -> KnowledgeDocument:
         previous = self._documents.get(document.document_id)
         if previous is not None:
+            if previous.workspace_id != document.workspace_id:
+                raise PermissionError("knowledge document workspace cannot change")
             document.version = previous.version + 1
         self._documents[document.document_id] = document
         return document
 
-    def search(self, query: str, limit: int = 10) -> list[KnowledgeDocument]:
+    def search(self, query: str, limit: int = 10, workspace_id: UUID | None = None) -> list[KnowledgeDocument]:
         if not query.strip():
             raise ValueError("query must not be empty")
         if limit < 1 or limit > 100:
@@ -119,6 +124,8 @@ class KnowledgeBase:
         terms = {term.lower() for term in query.split() if term.strip()}
         scored: list[tuple[int, KnowledgeDocument]] = []
         for document in self._documents.values():
+            if workspace_id is not None and document.workspace_id != workspace_id:
+                continue
             haystack = f"{document.title} {document.text} {' '.join(document.tags)}".lower()
             score = sum(haystack.count(term) for term in terms)
             if score:
