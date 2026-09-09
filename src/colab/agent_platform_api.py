@@ -1,6 +1,7 @@
 """Phase 19 Agent Platform API."""
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Request
@@ -33,7 +34,7 @@ class AgentCreate(BaseModel):
     code_revision: str
     model: str
     tools: list[str] = Field(default_factory=list)
-    configuration: dict = Field(default_factory=dict)
+    configuration: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
 
 
@@ -67,7 +68,7 @@ class CostRequest(BaseModel):
     agent_id: UUID
 
 
-def register_agent_routes(app) -> None:
+def register_agent_routes(app: Any) -> None:
     registry = InMemoryAgentRegistry()
     app.state.agent_registry = registry
     app.include_router(router)
@@ -82,15 +83,15 @@ def register_agent_routes(app) -> None:
         require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
         return registry.list(workspace_id)
 
-    @app.post("/api/agents/evaluate", response_model=dict)
-    def evaluate(payload: EvaluationQuery, request: Request) -> dict:
+    @app.post("/api/agents/evaluate", response_model=dict[str, Any])
+    def evaluate(payload: EvaluationQuery, request: Request) -> dict[str, Any]:
         require_workspace_membership(request, payload.workspace_id, Permission.VALIDATE)
         summary = evaluate_results(payload.results, payload.agent_id)
         history = historical_performance(payload.results, payload.agent_id)
         return {"summary": summary, "historical_performance": history}
 
-    @app.post("/api/agents/arbitrate", response_model=dict)
-    def arbitration(payload: ArbitrationRequest, request: Request) -> dict:
+    @app.post("/api/agents/arbitrate", response_model=dict[str, Any])
+    def arbitration(payload: ArbitrationRequest, request: Request) -> dict[str, Any]:
         require_workspace_membership(request, payload.workspace_id, Permission.RESEARCH_WRITE)
         return arbitrate(payload.candidates, payload.minimum_evidence).model_dump(mode="json")
 
@@ -99,7 +100,7 @@ def register_agent_routes(app) -> None:
         require_workspace_membership(request, payload.workspace_id, Permission.WORKSPACE_READ)
         return retrieve_memory(payload.memories, payload.workspace_id, payload.query, payload.agent_id, payload.limit)
 
-    @app.post("/api/agents/costs", response_model=dict)
-    def costs(payload: CostRequest, request: Request) -> dict:
+    @app.post("/api/agents/costs", response_model=dict[str, Any])
+    def costs(payload: CostRequest, request: Request) -> dict[str, Any]:
         require_workspace_membership(request, payload.workspace_id, Permission.AUDIT_READ)
         return summarize_costs(payload.records, payload.agent_id).model_dump(mode="json")
