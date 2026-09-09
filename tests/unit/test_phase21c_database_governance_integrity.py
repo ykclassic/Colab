@@ -6,7 +6,6 @@ run against the target database before production rollout.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 
@@ -22,7 +21,8 @@ def test_phase21c_migration_is_ordered_after_phase21b() -> None:
     assert MIGRATION.name.startswith("20260909143000_")
     versions = sorted(path.name for path in MIGRATION.parent.glob("*.sql"))
     assert versions.index(MIGRATION.name) > versions.index("20260909140000_phase21b_database_tenant_integrity.sql")
-    assert re.match(r"^\d{14}_", MIGRATION.name)
+    assert MIGRATION.name.split("_", 1)[0].isdigit()
+    assert len(MIGRATION.name.split("_", 1)[0]) == 14
 
 
 def test_governance_event_ledger_is_workspace_bound_and_append_only() -> None:
