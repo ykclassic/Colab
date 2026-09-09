@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from colab.api import create_app
 from colab.collaboration_api import CollaborationRunRequest
@@ -40,13 +41,13 @@ def test_workspace_mutation_requires_write_permission() -> None:
 
 def test_collaboration_request_is_workspace_bound() -> None:
     fields = {"product_goal": "test", "tasks": []}
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         CollaborationRunRequest.model_validate(fields)
 
 
 def test_quant_request_is_workspace_bound() -> None:
     fields = {"symbol": "TEST", "bars": []}
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         QuantRunRequest.model_validate(fields)
 
 
