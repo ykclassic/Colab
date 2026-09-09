@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from colab.api import create_app
+from colab.api import app
 from colab.collaboration_api import CollaborationRunRequest
 from colab.quant_api import QuantRunRequest
 
@@ -19,7 +19,7 @@ def _test_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _client() -> TestClient:
-    return TestClient(create_app())
+    return TestClient(app)
 
 
 def test_api_requires_authentication() -> None:
