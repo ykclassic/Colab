@@ -59,7 +59,7 @@ ROLE_PERMISSIONS: dict[PlatformRole, frozenset[Permission]] = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Principal:
     user_id: str
     role: PlatformRole
@@ -71,7 +71,7 @@ class Principal:
 
 
 class AuthenticationError(ValueError):
-    """Raised when a bearer token cannot be trusted."""
+    """Raised when an access token cannot be trusted."""
 
 
 class AuthorizationError(PermissionError):
@@ -148,6 +148,13 @@ def authenticate_bearer(token: str) -> Principal:
         session_id=str(claims["session_id"]) if claims.get("session_id") else None,
         email=str(claims["email"]) if claims.get("email") else None,
     )
+
+
+def principal_from_test_header(user_id: str, role: str) -> Principal:
+    try:
+        return Principal(user_id=user_id, role=PlatformRole(role))
+    except ValueError as exc:
+        raise AuthenticationError("invalid test role") from exc
 
 
 def require_permission(principal: Principal, permission: Permission) -> None:
@@ -240,7 +247,7 @@ def authorize_endpoint(request: Request, permission: Permission = Permission.WOR
 
 def extract_workspace_id(path: str) -> UUID | None:
     match = re.search(r"/api/workspaces/([0-9a-fA-F-]{36})(?:/|$)", path)
-    if not match:
+    if match is None:
         return None
     try:
         return UUID(match.group(1))
@@ -249,39 +256,42 @@ def extract_workspace_id(path: str) -> UUID | None:
 
 
 class RateLimiter:
-    """Process-local safety net; edge rate limiting remains recommended in production."""
-
-    def __init__(self, requests_per_minute: int = 120) -> None:
-        self.requests_per_minute = max(1, requests_per_minute)
-        self._hits: dict[str, list[float]] = {}
+    def __init__(self, limit: int = 120, window_seconds: int = 60) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self._events: dict[str, list[float]] = {}
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
-        hits = [stamp for stamp in self._hits.get(key, []) if now - stamp < 60]
-        if len(hits) >= self.requests_per_minute:
-            self._hits[key] = hits
+        cutoff = now - self.window_seconds
+        events = [stamp for stamp in self._events.get(key, []) if stamp > cutoff]
+        if len(events) >= self.limit:
+            self._events[key] = events
             return False
-        hits.append(now)
-        self._hits[key] = hits
+        events.append(now)
+        self._events[key] = events
         return True
 
 
 class SecurityMiddleware:
-    """Production API authentication, tenant checks, rate limiting, and headers."""
+    """Production API authentication, tenant authorization, rate limiting and headers."""
 
-    def __init__(self, app: Any, requests_per_minute: int = 120) -> None:
+    def __init__(self, app: Any, rate_limiter: RateLimiter | None = None) -> None:
         self.app = app
-        self.limiter = RateLimiter(requests_per_minute)
+        self.rate_limiter = rate_limiter or RateLimiter()
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return
-        path = str(scope.get("path", ""))
-        if path.startswith("/api/") and auth_required():
+        path = scope.get("path", "")
+        method = scope.get("method", "GET").upper()
+        headers = {key.decode().lower(): value.decode() for key, value in scope.get("headers", [])}
+        if path.startswith("/api/"):
             client = scope.get("client")
-            if not self.limiter.allow(str(client[0]) if client else "unknown"):
-                await self._json(send, 429, b'{"detail":"rate limit exceeded"}', [(b"retry-after", b"60")])
+            client_ip = client[0] if client else "unknown"
+            if not self.rate_limiter.allow(client_ip):
+                await self._json(send, 429, b'{"detail":"rate limit exceeded"}', [])
                 return
             request = Request(scope, receive=receive)
             try:
@@ -289,22 +299,19 @@ class SecurityMiddleware:
                 scope.setdefault("state", {})["principal"] = principal
                 workspace_id = extract_workspace_id(path)
                 if workspace_id is not None:
-                    permission = (
-                        Permission.WORKSPACE_WRITE
-                        if scope.get("method", "GET").upper() in {"POST", "PUT", "PATCH", "DELETE"}
-                        else Permission.WORKSPACE_READ
-                    )
+                    permission = Permission.WORKSPACE_WRITE if method in {"POST", "PUT", "PATCH", "DELETE"} else Permission.WORKSPACE_READ
                     require_workspace_membership(request, workspace_id, permission)
             except HTTPException as exc:
-                headers = [(b"www-authenticate", b"Bearer")] if exc.status_code == 401 else []
-                body = f'{{"detail":"{str(exc.detail)}"}}'.encode()
-                await self._json(send, exc.status_code, body, headers)
+                response_headers = [(b"www-authenticate", b"Bearer")] if exc.status_code == 401 else []
+                detail = str(exc.detail).replace('"', '\\"')
+                body = f'{{"detail":{detail!r}}}'.encode()
+                await self._json(send, exc.status_code, body, response_headers)
                 return
 
         async def secure_send(message: dict[str, Any]) -> None:
             if message.get("type") == "http.response.start":
-                headers = list(message.get("headers", []))
-                headers.extend(
+                response_headers = list(message.get("headers", []))
+                response_headers.extend(
                     [
                         (b"x-content-type-options", b"nosniff"),
                         (b"x-frame-options", b"DENY"),
@@ -312,108 +319,40 @@ class SecurityMiddleware:
                         (b"cache-control", b"no-store"),
                     ]
                 )
-                message["headers"] = headers
+                message = {**message, "headers": response_headers}
             await send(message)
 
         await self.app(scope, receive, secure_send)
 
     @staticmethod
-    async def _json(send: Any, code: int, body: bytes, extra: list[tuple[bytes, bytes]]) -> None:
-        await send(
-            {
-                "type": "http.response.start",
-                "status": code,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode()),
-                    *extra,
-                ],
-            }
-        )
+    async def _json(send: Any, status_code: int, body: bytes, headers: list[tuple[bytes, bytes]]) -> None:
+        base_headers = [(b"content-type", b"application/json"), *headers]
+        await send({"type": "http.response.start", "status": status_code, "headers": base_headers})
         await send({"type": "http.response.body", "body": body})
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ApprovalRecord:
     approval_id: str
-    workflow_id: str
     artifact_id: str
-    artifact_version: int
-    risk_assessment_id: str
-    requested_by: str
+    approved_by: str
     decision: str
-    decided_by: str | None = None
-    rationale: str | None = None
 
 
 class ApprovalService:
-    """In-memory governance boundary retained for deterministic unit tests."""
-
     def __init__(self) -> None:
-        self._requests: dict[str, ApprovalRecord] = {}
+        self._records: list[ApprovalRecord] = []
 
-    def request(
-        self,
-        approval_id: str,
-        workflow_id: str,
-        artifact_id: str,
-        artifact_version: int,
-        risk_assessment_id: str,
-        requested_by: Principal,
-    ) -> ApprovalRecord:
-        require_permission(requested_by, Permission.WORKSPACE_WRITE)
+    def submit(self, artifact_id: str, principal: Principal, decision: str) -> ApprovalRecord:
+        require_permission(principal, Permission.APPROVE)
         record = ApprovalRecord(
-            approval_id,
-            workflow_id,
-            artifact_id,
-            artifact_version,
-            risk_assessment_id,
-            requested_by.user_id,
-            "pending",
+            approval_id=f"approval-{len(self._records) + 1}",
+            artifact_id=artifact_id,
+            approved_by=principal.user_id,
+            decision=decision,
         )
-        self._requests[approval_id] = record
+        self._records.append(record)
         return record
 
-    def decide(self, approval_id: str, principal: Principal, decision: str, rationale: str) -> ApprovalRecord:
-        require_permission(principal, Permission.APPROVE)
-        if decision not in {"approve", "reject"}:
-            raise ValueError("decision must be approve or reject")
-        if not rationale.strip():
-            raise ValueError("approval rationale is required")
-        try:
-            current = self._requests[approval_id]
-        except KeyError as exc:
-            raise KeyError(approval_id) from exc
-        if current.decision != "pending":
-            raise ValueError("approval is already decided")
-        if current.requested_by == principal.user_id:
-            raise AuthorizationError("requester cannot approve their own request")
-        updated = ApprovalRecord(
-            current.approval_id,
-            current.workflow_id,
-            current.artifact_id,
-            current.artifact_version,
-            current.risk_assessment_id,
-            current.requested_by,
-            decision,
-            principal.user_id,
-            rationale.strip(),
-        )
-        self._requests[approval_id] = updated
-        return updated
-
-    def get(self, approval_id: str) -> ApprovalRecord:
-        try:
-            return self._requests[approval_id]
-        except KeyError as exc:
-            raise KeyError(approval_id) from exc
-
-
-def principal_from_test_header(user_id: str, role: str) -> Principal:
-    if os.getenv("COLAB_ALLOW_TEST_AUTH", "false").lower() != "true":
-        raise AuthenticationError("test authentication is disabled")
-    try:
-        parsed_role = PlatformRole(role)
-    except ValueError as exc:
-        raise AuthenticationError("invalid test role") from exc
-    return Principal(user_id=user_id, role=parsed_role)
+    def list(self) -> list[ApprovalRecord]:
+        return list(self._records)
