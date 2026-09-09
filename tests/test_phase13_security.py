@@ -63,16 +63,17 @@ def test_security_principal_and_membership_branches(monkeypatch: pytest.MonkeyPa
         principal = current_principal(request)
         return {"user_id": principal.user_id, "role": principal.role.value}
 
+    @app.get("/api/membership/{workspace_id}")
+    def membership_route(request: Request, workspace_id: UUID) -> dict[str, bool]:
+        request.state.principal = Principal("researcher", PlatformRole.RESEARCHER)
+        require_workspace_membership(request, workspace_id, Permission.APPROVE)
+        return {"ok": True}
+
     client = TestClient(app)
     response = client.get("/api/test", headers={"X-Test-User": "tester", "X-Test-Role": "reviewer"})
     assert response.status_code == 200
     assert response.json() == {"user_id": "tester", "role": "reviewer"}
-
-    app.state.services = type("Services", (), {"database": None})()
-    request = Request({"type": "http", "method": "GET", "path": "/api/test", "headers": [], "query_string": b"", "server": ("test", 80), "client": ("127.0.0.1", 1), "scheme": "http", "state": {}})
-    request.state.principal = Principal("researcher", PlatformRole.RESEARCHER)
-    with pytest.raises(Exception, match="insufficient permissions"):
-        require_workspace_membership(request, uuid4(), Permission.APPROVE)
+    assert client.get(f"/api/membership/{uuid4()}").status_code == 403
 
 
 def test_security_middleware_rate_limit_and_headers() -> None:
