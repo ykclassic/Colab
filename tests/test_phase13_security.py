@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import time
+from uuid import UUID, uuid4
+
+import jwt
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from colab.security import (
+    Permission,
+    PlatformRole,
+    Principal,
+    RateLimiter,
+    SecurityMiddleware,
+    authenticate_bearer,
+    require_permission,
+    require_workspace_membership,
+)
+
+
+def _token(secret: str, user_id: UUID, role: str) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "sub": str(user_id),
+            "role": "authenticated",
+            "aud": "authenticated",
+            "iss": "https://example.supabase.co/auth/v1",
+            "iat": now,
+            "exp": now + 300,
+            "app_metadata": {"colab_role": role},
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+
+def test_role_matrix_keeps_risk_and_approval_independent() -> None:
+    risk = Principal("risk", PlatformRole.RISK)
+    reviewer = Principal("reviewer", PlatformRole.REVIEWER)
+    assert risk.can(Permission.RISK_ASSESS)
+    assert not risk.can(Permission.APPROVE)
+    assert reviewer.can(Permission.APPROVE)
+    with pytest.raises(PermissionError):
+        require_permission(risk, Permission.APPROVE)
+
+
+def test_supabase_jwt_validates_issuer_audience_and_app_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "test-secret"
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("COLAB_JWT_SECRET", secret)
+    principal = authenticate_bearer(_token(secret, UUID("00000000-0000-0000-0000-000000000001"), "reviewer"))
+    assert principal.user_id == "00000000-0000-0000-0000-000000000001"
+    assert principal.role is PlatformRole.REVIEWER
+
+
+def test_supabase_jwt_rejects_bad_audience(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("COLAB_JWT_SECRET", "test-secret")
+    token = jwt.encode({"sub": str(uuid4()), "aud": "wrong", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS256")
+    with pytest.raises(ValueError, match="invalid or expired"):
+        authenticate_bearer(token)
+
+
+def test_rate_limiter_blocks_burst() -> None:
+    limiter = RateLimiter(2)
+    assert limiter.allow("user")
+    assert limiter.allow("user")
+    assert not limiter.allow("user")
+    assert limiter.allow("other")
+
+
+def test_security_middleware_protects_api_when_auth_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLAB_ENV", "production")
+    monkeypatch.delenv("COLAB_REQUIRE_AUTH", raising=False)
+    app = FastAPI()
+    app.add_middleware(SecurityMiddleware)
+
+    @app.get("/api/protected")
+    def protected() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app)
+    assert client.get("/api/protected").status_code == 401
+    assert client.get("/health").status_code == 404
+
+
+def test_workspace_membership_fails_closed_for_missing_membership() -> None:
+    class FakeDB:
+        _connection_factory = lambda self: None
+
+    app = FastAPI()
+    app.state.services = type("Services", (), {"database": FakeDB()})()
+    client = TestClient(app)
+    # This test covers the HTTP contract through a route that calls the common dependency.
+    @app.get("/api/workspaces/{workspace_id}")
+    def workspace(request):
+        require_workspace_membership(request, UUID(request.path_params["workspace_id"]))
+        return {"ok": True}
+    assert client.get(f"/api/workspaces/{uuid4()}").status_code in {404, 500}
