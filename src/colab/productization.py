@@ -60,7 +60,9 @@ class ArtifactRecord(BaseModel):
 class KnowledgeDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
     document_id: UUID = Field(default_factory=uuid4)
-    workspace_id: UUID
+    # Nullable only for legacy rows during the migration. All API-created documents
+    # are required to carry an explicit workspace_id and are authorized before access.
+    workspace_id: UUID | None = None
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, max_length=200000)
     source: str = Field(min_length=1, max_length=1000)
