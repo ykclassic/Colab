@@ -2,8 +2,21 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from colab.agent_platform import AgentRecord, ArbitrationCandidate, EvaluationCase, EvaluationResult, EvidenceItem, MemoryRecord, CostRecord
-from colab.agent_platform_vertical_slice import InMemoryAgentPlatformStore, run_agent_vertical_slice, version_transition_allowed
+from colab.agent_platform import (
+    AgentRecord,
+    ArbitrationCandidate,
+    CostRecord,
+    EvaluationCase,
+    EvaluationResult,
+    EvidenceItem,
+    MemoryRecord,
+    retrieve_memory,
+)
+from colab.agent_platform_vertical_slice import (
+    InMemoryAgentPlatformStore,
+    run_agent_vertical_slice,
+    version_transition_allowed,
+)
 
 
 def make_agent(workspace_id, version=1, revision="rev-a"):
@@ -18,8 +31,7 @@ def test_agent_vertical_slice_registration_to_governance() -> None:
     memory = MemoryRecord(workspace_id=workspace, agent_id=agent.agent_id, key="source preference", value="primary evidence", source="evaluation", confidence=.9)
     cost = CostRecord(workspace_id=workspace, agent_id=agent.agent_id, model=agent.model, tokens_in=100, tokens_out=50, cost_usd=.02, latency_ms=120)
     candidate = ArbitrationCandidate(agent_id=agent.agent_id, answer="supported", confidence=.9, evidence=[EvidenceItem(source_id="source-1", claim="claim", strength=.95)])
-    store = InMemoryAgentPlatformStore()
-    run = run_agent_vertical_slice(workspace_id=workspace, agent=agent, cases=[case], results=[result], arbitration_candidates=[candidate], memories=[memory], costs=[cost], store=store)
+    run = run_agent_vertical_slice(workspace_id=workspace, agent=agent, cases=[case], results=[result], arbitration_candidates=[candidate], memories=[memory], costs=[cost], store=InMemoryAgentPlatformStore())
     assert run.governance.approved
     assert run.benchmark.pass_rate == 1
     assert run.arbitration.winner_agent_id == agent.agent_id
@@ -48,7 +60,6 @@ def test_memory_lifecycle_expiry_and_workspace_isolation() -> None:
         MemoryRecord(workspace_id=workspace, key="expired", value="ignore", source="test", expires_at=now - timedelta(seconds=1)),
         MemoryRecord(workspace_id=other, key="foreign", value="do not leak", source="test"),
     ]
-    from colab.agent_platform import retrieve_memory
     found = retrieve_memory(memories, workspace, "live")
     assert [m.key for m in found] == ["live"]
 
