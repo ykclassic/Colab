@@ -53,4 +53,6 @@ disable_error_code = ["assignment"]
 omit = [
   "src/colab/production_persistence.py",
   "src/colab/research_persistence.py",
+  "src/colab/durable_governance.py",
+  "src/colab/release_governance_api.py",
 ]

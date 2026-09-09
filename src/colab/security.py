@@ -303,6 +303,10 @@ class ApprovalRecord:
     decided_by: str | None = None
     rationale: str | None = None
     required_reviewers: int = 1
+    workspace_id: str | None = None
+    strategy_version_id: str | None = None
+    artifact_digest: str | None = None
+    risk_assessment_digest: str | None = None
 
 
 class ApprovalService:
@@ -334,7 +338,7 @@ class ApprovalService:
             raise ValueError("decision must be approve or reject")
         if not rationale.strip():
             raise ValueError("rationale is required")
-        decided = ApprovalRecord(record.approval_id, record.workflow_id, record.artifact_id, record.risk_assessment_id, record.requested_by, decision, principal.user_id, rationale.strip(), record.required_reviewers)
+        decided = ApprovalRecord(record.approval_id, record.workflow_id, record.artifact_id, record.risk_assessment_id, record.requested_by, decision, principal.user_id, rationale.strip(), record.required_reviewers, record.workspace_id, record.strategy_version_id, record.artifact_digest, record.risk_assessment_digest)
         self._records[approval_id] = decided
         return decided
 
