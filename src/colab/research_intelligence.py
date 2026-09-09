@@ -25,6 +25,7 @@ class EmbeddingProvider(ABC):
     """Provider-neutral embedding contract."""
 
     name: str
+    model: str
     dimensions: int
 
     @abstractmethod
@@ -36,6 +37,7 @@ class DeterministicEmbeddingProvider(EmbeddingProvider):
     """Stable offline hashing embedding for tests and no-key environments."""
 
     name = "deterministic-hash"
+    model = "deterministic-hash-v1"
     dimensions = 384
 
     def embed(self, text: str) -> list[float]:
@@ -70,7 +72,6 @@ class BasicTextExtractor:
 
 class DocumentSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     source_id: UUID = Field(default_factory=uuid4)
     uri: str = Field(min_length=1, max_length=2000)
     title: str = Field(min_length=1, max_length=500)
@@ -85,7 +86,6 @@ class DocumentSource(BaseModel):
 
 class ResearchDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     document_id: UUID = Field(default_factory=uuid4)
     workspace_id: UUID | None = None
     source_id: UUID
@@ -99,7 +99,6 @@ class ResearchDocument(BaseModel):
 
 class ResearchChunk(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     chunk_id: UUID = Field(default_factory=uuid4)
     document_id: UUID
     ordinal: int = Field(ge=0)
@@ -113,7 +112,6 @@ class ResearchChunk(BaseModel):
 
 class Citation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     citation_id: str = Field(pattern=r"^SRC-[0-9A-F]{12}$")
     source_id: UUID
     document_id: UUID
@@ -127,7 +125,6 @@ class Citation(BaseModel):
 
 class ResearchSynthesis(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     synthesis_id: UUID = Field(default_factory=uuid4)
     query: str = Field(min_length=1, max_length=10_000)
     answer: str = Field(min_length=1, max_length=100_000)
