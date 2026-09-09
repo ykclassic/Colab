@@ -10,17 +10,54 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .collaboration_api import register_collaboration_routes
-from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
+from .operations import (
+    EventLevel,
+    ExecutionCoordinator,
+    ExecutionJob,
+    MetricsSnapshot,
+    ObservabilityRecorder,
+    OperationalEvent,
+)
 from .production_persistence import PostgresPlatformStore
-from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
+from .productization import (
+    ArtifactRecord,
+    InMemoryArtifactStore,
+    KnowledgeBase,
+    KnowledgeDocument,
+    StrategySpec,
+    ToolDefinition,
+    ToolRegistry,
+    Workspace,
+    WorkspaceManager,
+    build_artifact,
+)
 from .quant_api import register_quant_routes
 from .release_governance_api import register_release_governance_routes
 from .research_api import router as research_router
 from .research_intelligence import ResearchIntelligence
 from .security import Permission, require_workspace_membership
-from .service_adapters import PostgresArtifactStore, PostgresExecutionCoordinator, PostgresKnowledgeBase, PostgresObservabilityRecorder, PostgresToolRegistry, PostgresWorkspaceManager, production_connection_factory_from_dsn
-from .service_contracts import ArtifactService, ExecutionService, KnowledgeService, ObservabilityService, ToolService, WorkspaceService
+from .service_adapters import (
+    PostgresArtifactStore,
+    PostgresExecutionCoordinator,
+    PostgresKnowledgeBase,
+    PostgresObservabilityRecorder,
+    PostgresToolRegistry,
+    PostgresWorkspaceManager,
+    production_connection_factory_from_dsn,
+)
+from .service_contracts import (
+    ArtifactService,
+    ExecutionService,
+    KnowledgeService,
+    ObservabilityService,
+    ToolService,
+    WorkspaceService,
+)
 from .workspace_api import register_workspace_routes
+
+_KNOWLEDGE_QUERY = Query(min_length=1)
+_KNOWLEDGE_WORKSPACE = Query(...)
+_KNOWLEDGE_LIMIT = Query(default=10, ge=1, le=100)
 
 
 class WorkspaceCreate(BaseModel):
@@ -190,7 +227,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="knowledge document belongs to another workspace") from exc
 
     @app.get("/api/knowledge/search", response_model=list[KnowledgeDocument])
-    def search_knowledge(request: Request, q: str = Query(min_length=1), workspace_id: UUID = Query(...), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
+    def search_knowledge(request: Request, q: str = _KNOWLEDGE_QUERY, workspace_id: UUID = _KNOWLEDGE_WORKSPACE, limit: int = _KNOWLEDGE_LIMIT) -> list[KnowledgeDocument]:
         require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
         return services.knowledge.search(q, limit, workspace_id)
 
