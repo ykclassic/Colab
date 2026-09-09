@@ -1,6 +1,7 @@
 """Phase 13 identity, authorization, tenant isolation, and governance security."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -286,7 +287,6 @@ class SecurityMiddleware:
             return
         path = scope.get("path", "")
         method = scope.get("method", "GET").upper()
-        headers = {key.decode().lower(): value.decode() for key, value in scope.get("headers", [])}
         if path.startswith("/api/"):
             client = scope.get("client")
             client_ip = client[0] if client else "unknown"
@@ -303,8 +303,7 @@ class SecurityMiddleware:
                     require_workspace_membership(request, workspace_id, permission)
             except HTTPException as exc:
                 response_headers = [(b"www-authenticate", b"Bearer")] if exc.status_code == 401 else []
-                detail = str(exc.detail).replace('"', '\\"')
-                body = f'{{"detail":{detail!r}}}'.encode()
+                body = json.dumps({"detail": exc.detail}, separators=(",", ":")).encode()
                 await self._json(send, exc.status_code, body, response_headers)
                 return
 
