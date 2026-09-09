@@ -1,16 +1,23 @@
 """Phase 19 Agent Platform API."""
 from __future__ import annotations
 
-import os
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_platform import (
-    AgentRecord, ArbitrationCandidate, CostRecord, EvaluationResult, MemoryRecord,
-    InMemoryAgentRegistry, arbitrate, evaluate_results, historical_performance,
-    retrieve_memory, summarize_costs,
+    AgentRecord,
+    ArbitrationCandidate,
+    CostRecord,
+    EvaluationResult,
+    InMemoryAgentRegistry,
+    MemoryRecord,
+    arbitrate,
+    evaluate_results,
+    historical_performance,
+    retrieve_memory,
+    summarize_costs,
 )
 from .security import Permission, require_workspace_membership
 
