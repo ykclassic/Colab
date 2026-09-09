@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 from psycopg import Connection
 
-from .contracts import Stage, WorkflowState
+from .contracts import WorkflowState
 from .security import AuthorizationError, Permission, Principal, membership_role, require_permission
 from .workflow_integrity import WorkflowIntegrityError, state_hash, validate_event_chain
 
@@ -105,8 +105,7 @@ class DurableGovernanceStateMachine:
         previous_hash = self._events[-1].event_hash if self._events else None
         payload = f"{self.approval_id}|{self._state}|{target}|{actor}|{timestamp.isoformat()}|{self.current_input_digest}|{previous_hash}|{reason}"
         event_hash = sha256(payload.encode("utf-8")).hexdigest()
-        event = GovernanceEvent(self.approval_id, self.approval_id, self._state, target, actor, timestamp,
-                                self.current_input_digest, previous_hash, event_hash, reason.strip())
+        event = GovernanceEvent(self.approval_id, self.approval_id, self._state, target, actor, timestamp, self.current_input_digest, previous_hash, event_hash, reason.strip())
         self._events.append(event)
         self._state = target
         return event
@@ -118,7 +117,7 @@ class DurableGovernanceStateMachine:
 
     def expire_if_due(self, *, now: datetime | None = None, actor: str = "governance-system") -> bool:
         terminal = {GovernanceState.PROMOTED, GovernanceState.REJECTED, GovernanceState.INVALIDATED, GovernanceState.SUPERSEDED, GovernanceState.EXPIRED}
-        if self._expires_at is None or self._state in {None, *terminal}:
+        if self._expires_at is None or self._state is None or self._state in terminal:
             return False
         timestamp = now or datetime.now(UTC)
         if timestamp < self._expires_at:
