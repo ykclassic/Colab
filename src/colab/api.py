@@ -31,6 +31,7 @@ from .productization import (
     WorkspaceManager,
     build_artifact,
 )
+from .quant_api import register_quant_routes
 from .service_adapters import (
     PostgresArtifactStore,
     PostgresExecutionCoordinator,
@@ -143,6 +144,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     app = FastAPI(title="Colab Agent Platform", version="0.6.0")
     app.state.services = services
     register_collaboration_routes(app)
+    register_quant_routes(app)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -275,7 +277,7 @@ input,textarea,button{font:inherit;padding:10px;border:1px solid #bbb;border-rad
 button{cursor:pointer;width:auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#eee}
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
 </style></head><body>
-<h1>Colab Agent Platform</h1><p>Phase 9 adds parallel agent execution, delegation, typed communication, and deterministic conflict arbitration.</p>
+<h1>Colab Agent Platform</h1><p>Phase 10 adds quantitative research, feature engineering, deterministic backtesting, parameter sweeps, and walk-forward/OOS evaluation.</p>
 <div class="grid"><section class="card"><h2>New workspace</h2><input id="name" placeholder="Workspace name"><textarea id="goal" placeholder="Product goal"></textarea>
 <button onclick="createWorkspace()">Create workspace</button><p id="workspaceResult"></p></section>
 <section class="card"><h2>Operations</h2><div id="metrics">Loading…</div></section></div>
