@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from .agent_platform import (
     AgentPlatformError,
@@ -19,7 +19,6 @@ from .agent_platform import (
     CostRecord,
     EvaluationCase,
     EvaluationResult,
-    EvidenceItem,
     MemoryRecord,
     arbitrate,
     evaluation_hash,
@@ -104,21 +103,7 @@ class InMemoryAgentPlatformStore:
         return agent
 
 
-def run_agent_vertical_slice(
-    *,
-    workspace_id: UUID,
-    agent: AgentRecord,
-    cases: list[EvaluationCase],
-    results: list[EvaluationResult],
-    arbitration_candidates: list[ArbitrationCandidate],
-    memories: list[MemoryRecord],
-    costs: list[CostRecord],
-    store: InMemoryAgentPlatformStore,
-    baseline_score: float | None = None,
-    regression_threshold: float = 0.05,
-    minimum_pass_rate: float = 0.8,
-    minimum_evidence_quality: float = 0.6,
-) -> AgentPlatformRun:
+def run_agent_vertical_slice(*, workspace_id: UUID, agent: AgentRecord, cases: list[EvaluationCase], results: list[EvaluationResult], arbitration_candidates: list[ArbitrationCandidate], memories: list[MemoryRecord], costs: list[CostRecord], store: InMemoryAgentPlatformStore, baseline_score: float | None = None, regression_threshold: float = 0.05, minimum_pass_rate: float = 0.8, minimum_evidence_quality: float = 0.6) -> AgentPlatformRun:
     if agent.workspace_id != workspace_id:
         raise AgentPlatformError("agent is outside workspace")
     if not cases:
@@ -129,27 +114,15 @@ def run_agent_vertical_slice(
         raise AgentPlatformError("benchmark requires exactly one result per case")
     if len({x.case_id for x in scoped_results}) != len(scoped_results):
         raise AgentPlatformError("duplicate evaluation results are not allowed")
-
     store.save_agent(agent)
     store.save_evaluations(scoped_results)
     summary = historical_performance(scoped_results, agent.agent_id)
     evidence_quality = sum(x.evidence_quality for x in scoped_results) / len(scoped_results)
     regression = baseline_score is not None and summary.mean_score < baseline_score - regression_threshold
-    benchmark_manifest = {
-        "agent": {"id": str(agent.agent_id), "version": agent.version, "revision": agent.code_revision, "model": agent.model},
-        "cases": [str(x.case_id) for x in cases],
-        "evaluations": [evaluation_hash(x) for x in scoped_results],
-        "thresholds": {"regression": regression_threshold, "pass_rate": minimum_pass_rate, "evidence": minimum_evidence_quality},
-    }
+    benchmark_manifest = {"agent": {"id": str(agent.agent_id), "version": agent.version, "revision": agent.code_revision, "model": agent.model}, "cases": [str(x.case_id) for x in cases], "evaluations": [evaluation_hash(x) for x in scoped_results], "thresholds": {"regression": regression_threshold, "pass_rate": minimum_pass_rate, "evidence": minimum_evidence_quality}}
     benchmark_hash = sha256(repr(sorted(benchmark_manifest.items())).encode()).hexdigest()
-    benchmark = AgentBenchmark(
-        agent_id=agent.agent_id, version=agent.version,
-        evaluation_ids=tuple(x.result_id for x in scoped_results), score=summary.mean_score,
-        pass_rate=summary.pass_rate, evidence_quality=evidence_quality,
-        regression=regression, baseline_score=baseline_score, benchmark_hash=benchmark_hash,
-    )
+    benchmark = AgentBenchmark(agent_id=agent.agent_id, version=agent.version, evaluation_ids=tuple(x.result_id for x in scoped_results), score=summary.mean_score, pass_rate=summary.pass_rate, evidence_quality=evidence_quality, regression=regression, baseline_score=baseline_score, benchmark_hash=benchmark_hash)
     store.save_benchmark(benchmark)
-
     scoped_memories = tuple(m for m in memories if m.workspace_id == workspace_id and (m.agent_id is None or m.agent_id == agent.agent_id))
     for memory in scoped_memories:
         store.save_memory(memory)
@@ -159,25 +132,12 @@ def run_agent_vertical_slice(
     cost_summary = summarize_costs(scoped_costs, agent.agent_id) if scoped_costs else None
     decision = arbitrate(arbitration_candidates)
     approved = not regression and benchmark.pass_rate >= minimum_pass_rate and benchmark.evidence_quality >= minimum_evidence_quality
-    governance = AgentGovernanceDecision(
-        agent_id=agent.agent_id, version=agent.version, approved=approved,
-        reason=("benchmark passed and no regression detected" if approved else "promotion blocked by benchmark, evidence, or regression gate"),
-        benchmark_hash=benchmark_hash, decided_at=datetime.now(UTC),
-    )
+    governance = AgentGovernanceDecision(agent_id=agent.agent_id, version=agent.version, approved=approved, reason=("benchmark passed and no regression detected" if approved else "promotion blocked by benchmark, evidence, or regression gate"), benchmark_hash=benchmark_hash, decided_at=datetime.now(UTC))
     store.save_governance(governance)
-    return AgentPlatformRun(
-        agent=agent, benchmark=benchmark, performance=summary, arbitration=decision,
-        memories=scoped_memories, costs=cost_summary, governance=governance,
-        evaluation_hashes=tuple(evaluation_hash(x) for x in scoped_results),
-    )
+    return AgentPlatformRun(agent=agent, benchmark=benchmark, performance=summary, arbitration=decision, memories=scoped_memories, costs=cost_summary, governance=governance, evaluation_hashes=tuple(evaluation_hash(x) for x in scoped_results))
 
 
 def version_transition_allowed(previous: AgentRecord | None, candidate: AgentRecord) -> bool:
     if previous is None:
         return candidate.version == 1
-    return (
-        previous.workspace_id == candidate.workspace_id
-        and previous.name == candidate.name
-        and candidate.version == previous.version + 1
-        and candidate.code_revision != previous.code_revision
-    )
+    return previous.workspace_id == candidate.workspace_id and previous.name == candidate.name and candidate.version == previous.version + 1 and candidate.code_revision != previous.code_revision
