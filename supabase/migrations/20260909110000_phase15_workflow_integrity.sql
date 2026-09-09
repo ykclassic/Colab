@@ -2,15 +2,18 @@
 -- Workflow events and snapshots are append-only durable records. The application
 -- computes SHA-256 hashes over canonical state; PostgreSQL enforces immutability.
 
+ALTER TABLE public.workflows
+    ADD COLUMN IF NOT EXISTS workspace_id uuid REFERENCES public.product_workspaces(workspace_id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS workflows_workspace_idx
+    ON public.workflows(workspace_id, updated_at DESC);
+
 ALTER TABLE public.workflow_checkpoints
     ADD COLUMN IF NOT EXISTS state_hash text;
 
-UPDATE public.workflow_checkpoints
-SET state_hash = encode(digest(state::text, 'sha256'), 'hex')
-WHERE state_hash IS NULL;
-
-ALTER TABLE public.workflow_checkpoints
-    ALTER COLUMN state_hash SET NOT NULL;
+-- Existing snapshots predate canonical hashing. They remain readable but are
+-- explicitly marked legacy until a trusted application save rewrites the state.
+-- Do not derive the application hash from jsonb::text: its representation is not
+-- the application's canonical JSON encoding.
 
 CREATE TABLE IF NOT EXISTS public.workflow_events (
     event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,6 +51,19 @@ USING (
     )
 );
 
+DROP POLICY IF EXISTS workflow_checkpoints_workspace_select ON public.workflow_checkpoints;
+CREATE POLICY workflow_checkpoints_workspace_select ON public.workflow_checkpoints
+FOR SELECT TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.workflows w
+        JOIN public.workspace_memberships m ON m.workspace_id = w.workspace_id
+        WHERE w.workflow_id = workflow_checkpoints.workflow_id
+          AND m.user_id = (SELECT auth.uid())
+    )
+);
+
 DROP FUNCTION IF EXISTS public.prevent_workflow_integrity_mutation();
 CREATE OR REPLACE FUNCTION public.prevent_workflow_integrity_mutation()
 RETURNS trigger
@@ -76,4 +92,4 @@ GRANT SELECT, INSERT ON public.workflow_events TO authenticated;
 GRANT SELECT, INSERT ON public.workflow_checkpoints TO authenticated;
 
 COMMENT ON TABLE public.workflow_events IS 'Append-only tamper-evident workflow transition ledger.';
-COMMENT ON TABLE public.workflow_checkpoints IS 'Append-only durable workflow snapshots validated against state hashes.';
+COMMENT ON TABLE public.workflow_checkpoints IS 'Append-only durable workflow snapshots validated against canonical state hashes.';
