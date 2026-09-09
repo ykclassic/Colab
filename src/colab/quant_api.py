@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
 from math import isnan
+import json
 import os
 from typing import Any
 from uuid import UUID
@@ -11,8 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantitativeResearchLab, QuantLabError
-from .quant_platform import (ExperimentRecord as DurableExperiment, InMemoryStrategyRegistry, StrategyRecord,
-                             monte_carlo, portfolio_risk, robustness_analysis, stress_test)
+from .quant_platform import InMemoryStrategyRegistry, StrategyRecord, ExperimentRecord as DurableExperiment, monte_carlo, portfolio_risk, robustness_analysis, stress_test
 from .quant_persistence import PostgresQuantStore
 from .security import Permission, require_workspace_membership
 from .service_adapters import production_connection_factory_from_dsn
@@ -45,6 +46,18 @@ class StrategyCreate(BaseModel):
     code_revision: str = Field(min_length=1, max_length=200)
     parameters: dict[str, Any] = Field(default_factory=dict)
     dataset_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+
+class ExperimentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
+    strategy_id: UUID
+    strategy_version: int = Field(ge=1)
+    dataset_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    seed: int = 42
+    configuration: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, float] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReturnsRequest(BaseModel):
@@ -118,10 +131,10 @@ def register_quant_routes(app: Any) -> None:
         if request.fast_window >= request.slow_window:
             raise HTTPException(status_code=422, detail="fast_window must be smaller than slow_window")
         dataset = _dataset(request)
-        features = FeatureEngineer().build(dataset, (min(request.fast_candidates + request.slow_candidates), max(request.fast_candidates + request.slow_candidates)))
-        grid = {"fast_window": request.fast_candidates, "slow_window": request.slow_candidates}
+        feature_windows = sorted(set(request.fast_candidates + request.slow_candidates))
+        features = FeatureEngineer().build(dataset, feature_windows)
         try:
-            result = lab.walk_forward(dataset, features, signal, grid, train_size=request.train_size, test_size=request.test_size)
+            result = lab.walk_forward(dataset, features, signal, {"fast_window": request.fast_candidates, "slow_window": request.slow_candidates}, train_size=request.train_size, test_size=request.test_size)
         except QuantLabError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"dataset_checksum": dataset.checksum, "train_size": request.train_size, "test_size": request.test_size, "result": result.model_dump(mode="json")}
@@ -129,16 +142,32 @@ def register_quant_routes(app: Any) -> None:
     @router.post("/strategies", response_model=StrategyRecord, status_code=201)
     def register_strategy(payload: StrategyCreate, request: Request) -> StrategyRecord:
         authorize(request, payload.workspace_id, Permission.RESEARCH_WRITE)
-        existing = (durable_store.list_strategies(payload.workspace_id) if durable_store else local_registry.list(payload.workspace_id))
+        existing = durable_store.list_strategies(payload.workspace_id) if durable_store else local_registry.list(payload.workspace_id)
         version = max((x.version for x in existing if x.name == payload.name), default=0) + 1
-        record = StrategyRecord(workspace_id=payload.workspace_id, name=payload.name, version=version,
-                                code_revision=payload.code_revision, parameters=payload.parameters, dataset_ids=payload.dataset_ids)
+        record = StrategyRecord(workspace_id=payload.workspace_id, name=payload.name, version=version, code_revision=payload.code_revision, parameters=payload.parameters, dataset_ids=payload.dataset_ids)
         return durable_store.register_strategy(record) if durable_store else local_registry.register(record)
 
     @router.get("/strategies", response_model=list[StrategyRecord])
     def list_strategies(request: Request, workspace_id: UUID) -> list[StrategyRecord]:
         authorize(request, workspace_id)
         return durable_store.list_strategies(workspace_id) if durable_store else local_registry.list(workspace_id)
+
+    @router.post("/experiments", status_code=201)
+    def save_experiment(payload: ExperimentCreate, request: Request) -> dict[str, Any]:
+        authorize(request, payload.workspace_id, Permission.RESEARCH_WRITE)
+        if durable_store:
+            strategies = durable_store.list_strategies(payload.workspace_id)
+        else:
+            strategies = local_registry.list(payload.workspace_id)
+        if not any(x.strategy_id == payload.strategy_id and x.version == payload.strategy_version for x in strategies):
+            raise HTTPException(status_code=404, detail="strategy version not found in workspace")
+        record = DurableExperiment(workspace_id=payload.workspace_id, strategy_id=payload.strategy_id, strategy_version=payload.strategy_version,
+                                   dataset_ids=payload.dataset_ids, seed=payload.seed, configuration=payload.configuration, metrics=payload.metrics)
+        digest = sha256(json.dumps({"record": record.model_dump(mode="json"), "result": payload.result}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if durable_store:
+            saved = durable_store.save_experiment(record, payload.result, digest)
+            return {"experiment": saved.model_dump(mode="json"), "experiment_hash": digest}
+        return {"experiment": record.model_dump(mode="json"), "result": payload.result, "experiment_hash": digest}
 
     @router.get("/experiments")
     def experiments(request: Request, workspace_id: UUID | None = None) -> dict[str, Any]:
