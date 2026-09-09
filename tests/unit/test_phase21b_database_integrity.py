@@ -32,7 +32,7 @@ def test_migration_versions_are_unique_and_strictly_ordered() -> None:
 def test_phase21b_enforces_workspace_identity_for_legacy_workflows() -> None:
     sql = PHASE21B.read_text(encoding="utf-8")
     assert "ADD COLUMN IF NOT EXISTS workspace_id uuid" in sql
-    assert "w.workspace_id = candidates.workspace_id" in sql
+    assert "SET workspace_id = candidates.workspace_id" in sql
     assert "workspace_id IS NOT NULL AND public.is_workspace_member(workspace_id)" in sql
 
 
