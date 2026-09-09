@@ -1,20 +1,28 @@
 """HTTP endpoints for quantitative research and the Phase 18 quant platform."""
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from hashlib import sha256
 from math import isnan
-import json
-import os
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantitativeResearchLab, QuantLabError
-from .quant_platform import InMemoryStrategyRegistry, StrategyRecord, ExperimentRecord as DurableExperiment, monte_carlo, portfolio_risk, robustness_analysis, stress_test
+from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantLabError, QuantitativeResearchLab
 from .quant_persistence import PostgresQuantStore
+from .quant_platform import (
+    ExperimentRecord as DurableExperiment,
+    InMemoryStrategyRegistry,
+    StrategyRecord,
+    monte_carlo,
+    portfolio_risk,
+    robustness_analysis,
+    stress_test,
+)
 from .security import Permission, require_workspace_membership
 from .service_adapters import production_connection_factory_from_dsn
 
@@ -155,14 +163,10 @@ def register_quant_routes(app: Any) -> None:
     @router.post("/experiments", status_code=201)
     def save_experiment(payload: ExperimentCreate, request: Request) -> dict[str, Any]:
         authorize(request, payload.workspace_id, Permission.RESEARCH_WRITE)
-        if durable_store:
-            strategies = durable_store.list_strategies(payload.workspace_id)
-        else:
-            strategies = local_registry.list(payload.workspace_id)
+        strategies = durable_store.list_strategies(payload.workspace_id) if durable_store else local_registry.list(payload.workspace_id)
         if not any(x.strategy_id == payload.strategy_id and x.version == payload.strategy_version for x in strategies):
             raise HTTPException(status_code=404, detail="strategy version not found in workspace")
-        record = DurableExperiment(workspace_id=payload.workspace_id, strategy_id=payload.strategy_id, strategy_version=payload.strategy_version,
-                                   dataset_ids=payload.dataset_ids, seed=payload.seed, configuration=payload.configuration, metrics=payload.metrics)
+        record = DurableExperiment(workspace_id=payload.workspace_id, strategy_id=payload.strategy_id, strategy_version=payload.strategy_version, dataset_ids=payload.dataset_ids, seed=payload.seed, configuration=payload.configuration, metrics=payload.metrics)
         digest = sha256(json.dumps({"record": record.model_dump(mode="json"), "result": payload.result}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         if durable_store:
             saved = durable_store.save_experiment(record, payload.result, digest)
