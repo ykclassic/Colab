@@ -1,4 +1,4 @@
-# noqa: I001
+# ruff: noqa: I001
 from uuid import uuid4
 
 import pytest
