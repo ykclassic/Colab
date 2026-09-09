@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from colab.release_governance import GateResult, ReleaseGovernance, StrategyVersion
+from colab.release_governance import GateResult, GovernanceError, ReleaseGovernance, StrategyVersion
 from colab.security import ApprovalService, AuthorizationError, Permission, PlatformRole, Principal
 
 
@@ -17,43 +17,67 @@ def reviewer(user_id: str = "reviewer") -> Principal:
     return Principal(user_id=user_id, role=PlatformRole.REVIEWER)
 
 
-def test_strategy_versions_are_immutable_domain_objects() -> None:
+def make_version(governance: ReleaseGovernance | None = None) -> StrategyVersion:
     version = StrategyVersion(
-        workspace_id=uuid4(), name="mean-reversion", version="1.0.0",
+        workspace_id=uuid4(), name="mean-reversion", version=str(uuid4()),
         artifact_digest="a" * 64, manifest_hash="b" * 64,
     )
+    if governance is not None:
+        governance.register_version(version)
+    return version
+
+
+def test_strategy_versions_are_immutable_domain_objects() -> None:
+    version = make_version()
     with pytest.raises(ValidationError):
         version.version = "1.0.1"  # type: ignore[misc]
 
 
-def test_promotion_binds_workspace_and_persists_gate_decision_in_service_contract() -> None:
+def test_release_governance_rejects_duplicate_and_unknown_versions() -> None:
+    governance = ReleaseGovernance()
+    version = make_version(governance)
+    with pytest.raises(GovernanceError, match="ID already exists"):
+        governance.register_version(version)
+    with pytest.raises(GovernanceError, match="not found"):
+        governance.get_version(uuid4())
+
+
+def test_release_governance_requires_gates_and_distinct_stages() -> None:
+    governance = ReleaseGovernance()
+    version = make_version(governance)
+    with pytest.raises(GovernanceError, match="at least one"):
+        governance.readiness(version.version_id, ())
+    gate = GateResult(gate="reproducibility", passed=True, score=100)
+    with pytest.raises(GovernanceError, match="unsupported"):
+        governance.promote(version.version_id, "candidate", "invalid", (gate,))
+    with pytest.raises(GovernanceError, match="must differ"):
+        governance.promote(version.version_id, "candidate", "candidate", (gate,))
+
+
+def test_promotion_binds_workspace_and_blocks_missing_gate_and_low_score() -> None:
     workspace_id = uuid4()
     governance = ReleaseGovernance()
-    version = governance.register_version(StrategyVersion(
+    version = StrategyVersion(
         workspace_id=workspace_id, name="strategy", version="1.0.0",
         artifact_digest="a" * 64, manifest_hash="b" * 64,
-    ))
+    )
+    governance.register_version(version)
+    gate = GateResult(gate="reproducibility", passed=True, score=100)
+    decision = governance.promote(version.version_id, "candidate", "staging", (gate,))
+    assert decision.approved is False
+    assert any("missing required gate" in reason for reason in decision.reasons)
+    assert any("below" in reason for reason in decision.reasons)
+    assert decision.workspace_id == workspace_id
+
+
+def test_promotion_with_all_required_gates_is_approved() -> None:
+    governance = ReleaseGovernance()
+    version = make_version(governance)
     gates = tuple(GateResult(gate=name, passed=True, score=100) for name in (
         "reproducibility", "version_integrity", "regression", "operational_readiness", "risk",
     ))
     decision = governance.promote(version.version_id, "staging", "production", gates)
     assert decision.approved is True
-    assert decision.workspace_id == workspace_id
-    assert {gate.gate for gate in decision.gates} == {gate.gate for gate in gates}
-
-
-def test_failed_required_gate_is_a_deterministic_promotion_blocker() -> None:
-    governance = ReleaseGovernance()
-    version = governance.register_version(StrategyVersion(
-        workspace_id=uuid4(), name="strategy", version="1.0.0",
-        artifact_digest="a" * 64, manifest_hash="b" * 64,
-    ))
-    gates = tuple(GateResult(gate=name, passed=name != "risk", score=100 if name != "risk" else 0) for name in (
-        "reproducibility", "version_integrity", "regression", "operational_readiness", "risk",
-    ))
-    decision = governance.promote(version.version_id, "staging", "production", gates)
-    assert decision.approved is False
-    assert "required gate failed: risk" in decision.reasons
 
 
 def test_legacy_approval_service_keeps_human_separation() -> None:
