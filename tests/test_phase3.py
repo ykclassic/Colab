@@ -1,11 +1,10 @@
-# ruff: noqa: I001,E701,E702
+# ruff: noqa: I001
 from __future__ import annotations
 
 from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-
 from colab.api import PlatformServices, create_app
 from colab.platform_persistence import PlatformRepository, connection_factory_from_dsn
 from colab.productization import ArtifactRecord, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace, WorkspaceManager, WorkspaceStatus, build_artifact
