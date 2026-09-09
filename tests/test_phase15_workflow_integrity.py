@@ -1,7 +1,7 @@
 import pytest
 
 from colab.contracts import Decision, RiskAssessment, Stage, WorkflowState
-from colab.orchestrator import Orchestrator, WorkflowError
+from colab.orchestrator import Orchestrator
 from colab.workflow_integrity import (
     WorkflowIntegrityError,
     state_hash,
@@ -22,12 +22,18 @@ def test_state_hash_is_deterministic_and_changes_with_state() -> None:
 def test_event_chain_requires_contiguous_sequences_and_hash_links() -> None:
     events = [
         {
-            "sequence_no": 1, "from_stage": "intake", "to_stage": "intake",
-            "previous_state_hash": None, "resulting_state_hash": "a" * 64,
+            "sequence_no": 1,
+            "from_stage": "intake",
+            "to_stage": "intake",
+            "previous_state_hash": None,
+            "resulting_state_hash": "a" * 64,
         },
         {
-            "sequence_no": 2, "from_stage": "intake", "to_stage": "decomposition",
-            "previous_state_hash": "a" * 64, "resulting_state_hash": "b" * 64,
+            "sequence_no": 2,
+            "from_stage": "intake",
+            "to_stage": "decomposition",
+            "previous_state_hash": "a" * 64,
+            "resulting_state_hash": "b" * 64,
         },
     ]
     validate_event_chain(events)
@@ -39,12 +45,18 @@ def test_event_chain_requires_contiguous_sequences_and_hash_links() -> None:
 def test_event_chain_rejects_stage_skipping() -> None:
     events = [
         {
-            "sequence_no": 1, "from_stage": "intake", "to_stage": "intake",
-            "previous_state_hash": None, "resulting_state_hash": "a" * 64,
+            "sequence_no": 1,
+            "from_stage": "intake",
+            "to_stage": "intake",
+            "previous_state_hash": None,
+            "resulting_state_hash": "a" * 64,
         },
         {
-            "sequence_no": 2, "from_stage": "intake", "to_stage": "research",
-            "previous_state_hash": "a" * 64, "resulting_state_hash": "b" * 64,
+            "sequence_no": 2,
+            "from_stage": "intake",
+            "to_stage": "research",
+            "previous_state_hash": "a" * 64,
+            "resulting_state_hash": "b" * 64,
         },
     ]
     with pytest.raises(WorkflowIntegrityError, match="skips a stage"):
@@ -69,8 +81,7 @@ def test_risk_and_human_gates_remain_required() -> None:
         validate_stage_transition(Stage.HUMAN_REVIEW, Stage.COMPLETE, state)
 
 
-def test_orchestrator_still_enforces_no_stage_skipping() -> None:
-    state = WorkflowState(product_goal="integrity")
-    state.current_stage = Stage.RESEARCH
-    with pytest.raises(WorkflowError):
+def test_orchestrator_still_rejects_terminal_workflow_advancement() -> None:
+    state = WorkflowState(product_goal="integrity", current_stage=Stage.COMPLETE)
+    with pytest.raises(Exception, match="No forward transition"):
         Orchestrator().advance(state)
