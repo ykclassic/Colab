@@ -1,3 +1,4 @@
+# ruff: noqa: I001,E701,E702
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -15,9 +16,7 @@ class Clock:
 
 
 def test_enqueue_is_idempotent_and_claim_requires_worker() -> None:
-    clock = Clock(); coordinator = ExecutionCoordinator(lease_seconds=30, clock=clock); workflow_id, workspace_id = uuid4(), uuid4()
-    first = coordinator.enqueue(workflow_id, workspace_id, "research", "same-key")
-    second = coordinator.enqueue(workflow_id, workspace_id, "research", "same-key")
+    clock = Clock(); coordinator = ExecutionCoordinator(lease_seconds=30, clock=clock); workflow_id, workspace_id = uuid4(), uuid4(); first = coordinator.enqueue(workflow_id, workspace_id, "research", "same-key"); second = coordinator.enqueue(workflow_id, workspace_id, "research", "same-key")
     assert second.job_id == first.job_id; assert coordinator.claim("worker-a") == first; assert coordinator.snapshot().running == 1
     with pytest.raises(ValueError): coordinator.claim(" ")
 
@@ -60,12 +59,9 @@ def test_validation_of_operational_limits() -> None:
 
 
 def test_api_execution_lifecycle_and_events() -> None:
-    services = PlatformServices(); client = TestClient(create_app(services)); workflow_id, workspace_id = uuid4(), uuid4()
-    payload = {"workflow_id": str(workflow_id), "workspace_id": str(workspace_id), "stage": "research", "idempotency_key": "api-key"}
+    services = PlatformServices(); client = TestClient(create_app(services)); workflow_id, workspace_id = uuid4(), uuid4(); payload = {"workflow_id": str(workflow_id), "workspace_id": str(workspace_id), "stage": "research", "idempotency_key": "api-key"}
     created = client.post("/api/executions", json=payload); assert created.status_code == 201; job = created.json(); duplicate = client.post("/api/executions", json=payload); assert duplicate.status_code == 201; assert duplicate.json()["job_id"] == job["job_id"]
     assert client.get("/api/operations/metrics").json()["pending"] == 1; claimed = client.post("/api/executions/claim", json={"worker_id": "worker-a"}); assert claimed.status_code == 200; job_id = claimed.json()["job_id"]
-    assert client.post(f"/api/executions/{job_id}/heartbeat", json={"worker_id": "worker-a"}).status_code == 200; assert client.post(f"/api/executions/{job_id}/complete", json={"worker_id": "worker-a"}).json()["status"] == "succeeded"
-    assert client.get("/api/operations/metrics").json()["succeeded"] == 1
-    events = client.get("/api/operations/events", params={"job_id": job_id, "workspace_id": str(workspace_id)}).json()
-    assert {event["event_type"] for event in events} >= {"execution_enqueued", "execution_claimed", "execution_succeeded"}
+    assert client.post(f"/api/executions/{job_id}/heartbeat", json={"worker_id": "worker-a"}).status_code == 200; assert client.post(f"/api/executions/{job_id}/complete", json={"worker_id": "worker-a"}).json()["status"] == "succeeded"; assert client.get("/api/operations/metrics").json()["succeeded"] == 1
+    events = client.get("/api/operations/events", params={"job_id": job_id, "workspace_id": str(workspace_id)}).json(); assert {event["event_type"] for event in events} >= {"execution_enqueued", "execution_claimed", "execution_succeeded"}
     assert client.post("/api/executions/claim", json={"worker_id": "worker-a"}).status_code == 409; assert client.post("/api/executions/not-a-uuid/cancel").status_code == 422
