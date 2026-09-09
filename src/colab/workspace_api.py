@@ -144,8 +144,11 @@ def register_workspace_routes(app: FastAPI) -> None:
     if not hasattr(app.state, "external_integrations"):
         app.state.external_integrations = ExternalIntegrationRegistry()
         register_external_integration_routes(app, app.state.external_integrations)
-    if not any(middleware.cls is SecurityMiddleware for middleware in app.user_middleware):
-        app.add_middleware(SecurityMiddleware, requests_per_minute=int(os.getenv("COLAB_RATE_LIMIT_PER_MINUTE", "120")))
+    if not any(cast(Any, middleware).cls is SecurityMiddleware for middleware in app.user_middleware):
+        cast(Any, app).add_middleware(
+            SecurityMiddleware,
+            requests_per_minute=int(os.getenv("COLAB_RATE_LIMIT_PER_MINUTE", "120")),
+        )
 
     @app.get("/api/auth/me")
     def auth_me(request: Request) -> dict[str, str | None]:
