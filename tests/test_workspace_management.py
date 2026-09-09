@@ -38,15 +38,17 @@ def test_in_memory_workspace_idempotency_and_lifecycle() -> None:
     assert manager.list(include_archived=True) == []
 
 
-def test_workspace_http_management_and_duplicate_post() -> None:
+def test_workspace_http_management_and_duplicate_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
     app = create_app(PlatformServices(max_concurrent=2))
     register_workspace_routes(app)
     client = TestClient(app)
     key = str(uuid4())
+    headers = {"Idempotency-Key": key, "X-Test-User": str(uuid4()), "X-Test-Role": "owner"}
     payload = {"name": "HTTP workspace", "product_goal": "Test management"}
 
-    first = client.post("/api/workspaces", json=payload, headers={"Idempotency-Key": key})
-    duplicate = client.post("/api/workspaces", json=payload, headers={"Idempotency-Key": key})
+    first = client.post("/api/workspaces", json=payload, headers=headers)
+    duplicate = client.post("/api/workspaces", json=payload, headers=headers)
     assert first.status_code == 201
     assert duplicate.status_code == 201
     assert first.json()["workspace_id"] == duplicate.json()["workspace_id"]
@@ -56,14 +58,15 @@ def test_workspace_http_management_and_duplicate_post() -> None:
     update = client.patch(
         f"/api/workspaces/{workspace_id}",
         json={"version": workspace["version"], "name": "Edited", "product_goal": "Edited goal", "priority": 10, "strategies": []},
+        headers=headers,
     )
     assert update.status_code == 200
     assert update.json()["version"] == workspace["version"] + 1
 
-    archive = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": update.json()["version"]})
+    archive = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": update.json()["version"]}, headers=headers)
     assert archive.status_code == 200
     assert archive.json()["status"] == "archived"
 
-    deleted = client.request("DELETE", f"/api/workspaces/{workspace_id}", json={"version": archive.json()["version"]})
+    deleted = client.request("DELETE", f"/api/workspaces/{workspace_id}", json={"version": archive.json()["version"]}, headers=headers)
     assert deleted.status_code == 204
-    assert client.get(f"/api/workspaces/{workspace_id}").status_code == 404
+    assert client.get(f"/api/workspaces/{workspace_id}", headers=headers).status_code == 404
