@@ -14,7 +14,13 @@ from .productization import StrategySpec, Workspace
 from .research_api import router as research_router
 from .research_intelligence import ResearchIntelligence
 from .research_persistence import PostgresResearchIntelligenceStore
-from .security import Permission, RateLimiter, SecurityMiddleware, authorize_endpoint, current_principal
+from .security import (
+    Permission,
+    RateLimiter,
+    SecurityMiddleware,
+    authorize_endpoint,
+    current_principal,
+)
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
