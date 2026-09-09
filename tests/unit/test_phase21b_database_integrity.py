@@ -1,8 +1,9 @@
 """Phase 21B static verification for database tenancy and migration integrity."""
 from __future__ import annotations
 
-from pathlib import Path
 import re
+
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
