@@ -3,9 +3,10 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from colab.release_governance import GateResult, ReleaseGovernance, StrategyVersion
-from colab.security import ApprovalService, Permission, PlatformRole, Principal
+from colab.security import ApprovalService, AuthorizationError, Permission, PlatformRole, Principal
 
 
 def owner(user_id: str = "owner") -> Principal:
@@ -21,7 +22,7 @@ def test_strategy_versions_are_immutable_domain_objects() -> None:
         workspace_id=uuid4(), name="mean-reversion", version="1.0.0",
         artifact_digest="a" * 64, manifest_hash="b" * 64,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         version.version = "1.0.1"  # type: ignore[misc]
 
 
@@ -60,7 +61,7 @@ def test_legacy_approval_service_keeps_human_separation() -> None:
     requester = owner("requester")
     approver = reviewer("approver")
     record = service.request("approval-1", "workflow-1", "artifact-1", 1, "risk-1", requester)
-    with pytest.raises(Exception):
+    with pytest.raises(AuthorizationError):
         service.decide(record.approval_id, requester, "approve", "self approval")
     decided = service.decide(record.approval_id, approver, "approve", "independent review")
     assert decided.decision == "approve"
