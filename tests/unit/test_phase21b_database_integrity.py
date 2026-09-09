@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "supabase" / "migrations"
 PHASE21B = MIGRATIONS / "20260909140000_phase21b_database_tenant_integrity.sql"
+PHASE19 = MIGRATIONS / "20260909130000_phase19_agent_platform.sql"
 
 
 def _migration_versions() -> list[tuple[int, str]]:
@@ -73,3 +74,9 @@ def test_phase21b_does_not_restore_anonymous_or_cross_tenant_access() -> None:
     sql = PHASE21B.read_text(encoding="utf-8")
     assert "TO anon" not in sql
     assert "public.is_workspace_member(workspace_id)" in sql
+
+
+def test_phase19_uses_the_authoritative_product_workspace_table() -> None:
+    sql = PHASE19.read_text(encoding="utf-8")
+    assert "references public.product_workspaces(workspace_id)" in sql
+    assert "references public.workspaces(id)" not in sql
