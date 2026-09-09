@@ -6,22 +6,9 @@ from uuid import uuid4
 
 import pytest
 
-from colab.contracts import (
-    AgentRole,
-    AgentTask,
-    Artifact,
-    Decision,
-    RiskAssessment,
-    Stage,
-    WorkflowState,
-)
-from colab.persistence import (
-    ConcurrentWorkflowUpdate,
-    PersistenceError,
-    PostgresWorkflowRepository,
-    WorkflowNotFound,
-    connection_factory_from_dsn,
-)
+from colab.contracts import AgentRole, AgentTask, Artifact, Decision, RiskAssessment, Stage, WorkflowState
+from colab.persistence import ConcurrentWorkflowUpdate, PersistenceError, PostgresWorkflowRepository, WorkflowNotFound, connection_factory_from_dsn
+from colab.workflow_integrity import WorkflowIntegrityError, state_hash
 
 
 class FakeCursor:
@@ -78,21 +65,11 @@ class FakeConnection:
 
 def state_with_children() -> WorkflowState:
     state = WorkflowState(product_goal="build a safe agent platform", current_stage=Stage.RISK)
-    state.agent_tasks.append(
-        AgentTask(role=AgentRole.RESEARCHER, objective="research", stage=Stage.RESEARCH)
-    )
-    state.research_artifacts.append(
-        Artifact(kind="research_report", producer=AgentRole.RESEARCHER, content={"result": "ok"})
-    )
-    state.strategy_candidates.append(
-        Artifact(kind="strategy", producer=AgentRole.STRATEGY, content={"signal": "test"})
-    )
-    state.implementation_artifacts.append(
-        Artifact(kind="implementation", producer=AgentRole.ENGINEER, content={"status": "ready"})
-    )
-    state.validation_results.append(
-        Artifact(kind="validation", producer=AgentRole.ENGINEER, content={"passed": True})
-    )
+    state.agent_tasks.append(AgentTask(role=AgentRole.RESEARCHER, objective="research", stage=Stage.RESEARCH))
+    state.research_artifacts.append(Artifact(kind="research_report", producer=AgentRole.RESEARCHER, content={"result": "ok"}))
+    state.strategy_candidates.append(Artifact(kind="strategy", producer=AgentRole.STRATEGY, content={"signal": "test"}))
+    state.implementation_artifacts.append(Artifact(kind="implementation", producer=AgentRole.ENGINEER, content={"status": "ready"}))
+    state.validation_results.append(Artifact(kind="validation", producer=AgentRole.ENGINEER, content={"passed": True}))
     state.risk_assessments.append(RiskAssessment(decision=Decision.APPROVE))
     state.decisions.append({"decision": "approve", "actor": "risk"})
     state.approvals.append({"decision": "approve", "actor": "human"})
@@ -101,21 +78,22 @@ def state_with_children() -> WorkflowState:
     return state
 
 
-def test_create_persists_workflow_children_and_checkpoint() -> None:
+def test_create_persists_workflow_children_checkpoint_and_integrity_event() -> None:
     cursor = FakeCursor()
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     assert repository.create(state_with_children()) == 1
-    assert len(cursor.executed) >= 10
+    assert len(cursor.executed) >= 11
     assert any("workflow_checkpoints" in sql for sql, _ in cursor.executed)
-    assert any("audit_events" in sql for sql, _ in cursor.executed)
+    assert any("workflow_events" in sql for sql, _ in cursor.executed)
 
 
 def test_save_persists_incremented_version_and_children() -> None:
-    cursor = FakeCursor(result_sets=[[(1,)], [(1,)]])
+    cursor = FakeCursor(result_sets=[[{"current_stage": "risk"}], [(1,)], [(1,)], []])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     state = state_with_children()
     assert repository.save(state, 1) == 2
     assert any("UPDATE public.workflows" in sql for sql, _ in cursor.executed)
+    assert any("workflow_events" in sql for sql, _ in cursor.executed)
 
 
 def test_save_rejects_non_positive_expected_version() -> None:
@@ -126,7 +104,6 @@ def test_save_rejects_non_positive_expected_version() -> None:
 
 def test_save_detects_optimistic_concurrency_conflict() -> None:
     cursor = FakeCursor()
-    cursor.rowcount = 0
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     with pytest.raises(ConcurrentWorkflowUpdate):
         repository.save(WorkflowState(product_goal="test"), 1)
@@ -139,61 +116,17 @@ def test_load_reconstructs_complete_state() -> None:
     artifact_id = uuid4()
     assessment_id = uuid4()
     event_id = uuid4()
-    workflow = {
-        "workflow_id": workflow_id,
-        "schema_version": "1.0",
-        "product_goal": "test",
-        "product_brief": {},
-        "roadmap": [],
-        "current_stage": "risk",
-        "iteration_count": 0,
-        "budgets": {},
-        "final_package": None,
-        "version": 4,
-    }
+    workflow = {"workflow_id": workflow_id, "schema_version": "1.0", "product_goal": "test", "product_brief": {},
+                "roadmap": [], "current_stage": "risk", "iteration_count": 0, "budgets": {}, "final_package": None,
+                "version": 4, "workspace_id": None}
     result_sets = [
         [workflow],
-        [
-            {
-                "task_id": task_id,
-                "role": "quant_researcher",
-                "objective": "research",
-                "stage": "research",
-                "status": "done",
-            }
-        ],
-        [
-            {
-                "artifact_id": artifact_id,
-                "kind": "report",
-                "version": 1,
-                "producer": "quant_researcher",
-                "content": {"x": 1},
-                "created_at": created,
-                "collection": "research",
-            }
-        ],
-        [
-            {
-                "assessment_id": assessment_id,
-                "decision": "approve",
-                "findings": [],
-                "controls": ["limit"],
-                "assessor": "risk_compliance",
-            }
-        ],
+        [{"task_id": task_id, "role": "quant_researcher", "objective": "research", "stage": "research", "status": "done"}],
+        [{"artifact_id": artifact_id, "kind": "report", "version": 1, "producer": "quant_researcher", "content": {"x": 1}, "created_at": created, "collection": "research"}],
+        [{"assessment_id": assessment_id, "decision": "approve", "findings": [], "controls": ["limit"], "assessor": "risk_compliance"}],
         [{"decision": {"decision": "approve"}}],
         [{"approval": {"decision": "approve"}}],
-        [
-            {
-                "event_id": event_id,
-                "event_type": "created",
-                "stage": "risk",
-                "actor": "system",
-                "message": "ok",
-                "at": created,
-            }
-        ],
+        [{"event_id": event_id, "event_type": "created", "stage": "risk", "actor": "system", "message": "ok", "at": created}],
     ]
     cursor = FakeCursor(result_sets=result_sets)
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
@@ -215,14 +148,14 @@ def test_load_missing_workflow_raises() -> None:
 
 
 def test_save_fails_if_decision_offset_row_is_missing() -> None:
-    cursor = FakeCursor(result_sets=[[None]])
+    cursor = FakeCursor(result_sets=[[{"current_stage": "intake"}], [None]])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     with pytest.raises(PersistenceError, match="decision offset"):
         repository.save(WorkflowState(product_goal="test"), 1)
 
 
 def test_save_fails_if_approval_offset_row_is_missing() -> None:
-    cursor = FakeCursor(result_sets=[[(0,)], [None]])
+    cursor = FakeCursor(result_sets=[[{"current_stage": "intake"}], [(0,)], [None]])
     repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
     with pytest.raises(PersistenceError, match="approval offset"):
         repository.save(WorkflowState(product_goal="test"), 1)
@@ -236,3 +169,23 @@ def test_connection_factory_rejects_empty_dsn() -> None:
 def test_connection_factory_returns_callable() -> None:
     factory = connection_factory_from_dsn("postgresql://example")
     assert callable(factory)
+
+
+def test_state_hash_excludes_audit_event_to_avoid_self_reference() -> None:
+    state = WorkflowState(product_goal="test")
+    digest = state_hash(state)
+    state.record("test", "system", "later audit record")
+    assert state_hash(state) == digest
+
+
+def test_repository_integrity_validation_detects_event_snapshot_mismatch() -> None:
+    state = WorkflowState(product_goal="test")
+    digest = state_hash(state)
+    events = [{"sequence_no": 1, "event_type": "created", "from_stage": "intake", "to_stage": "intake",
+               "previous_state_hash": None, "resulting_state_hash": digest, "snapshot_version": 1,
+               "actor": "system", "message": "created", "occurred_at": datetime.now(UTC)}]
+    snapshots = [{"version": 1, "state": state.model_dump(mode="json"), "state_hash": "f" * 64}]
+    cursor = FakeCursor(result_sets=[events, snapshots])
+    repository = PostgresWorkflowRepository(lambda: FakeConnection(cursor))
+    with pytest.raises(WorkflowIntegrityError, match="failed state hash"):
+        repository.validate_integrity(state.workflow_id)
