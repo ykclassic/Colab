@@ -35,6 +35,7 @@ from .quant_api import register_quant_routes
 from .release_governance_api import register_release_governance_routes
 from .research_api import router as research_router
 from .research_intelligence import ResearchIntelligence
+from .research_platform_api import router as research_platform_router, ResearchPlatformServices
 from .security import Permission, require_workspace_membership
 from .service_adapters import (
     PostgresArtifactStore,
@@ -150,10 +151,15 @@ class PlatformServices:
 
 def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
-    app = FastAPI(title="Colab Agent Platform", version="0.6.0")
+    app = FastAPI(title="Colab Agent Platform", version="0.7.0")
     app.state.services = services
     app.state.research_intelligence = ResearchIntelligence()
+    app.state.research_platform = ResearchPlatformServices(
+        database_dsn=os.getenv("COLAB_DATABASE_DSN"),
+        production=os.getenv("COLAB_ENV", "development").lower() == "production",
+    )
     app.include_router(research_router)
+    app.include_router(research_platform_router)
     register_collaboration_routes(app)
     register_quant_routes(app)
     register_release_governance_routes(app)
