@@ -67,3 +67,9 @@ def test_phase21b_revokes_anonymous_tenant_data_access() -> None:
     assert "FROM anon;" in sql
     assert "public.workflows" in sql
     assert "public.agent_costs" in sql
+
+
+def test_phase21b_does_not_restore_anonymous_or_cross_tenant_access() -> None:
+    sql = PHASE21B.read_text(encoding="utf-8")
+    assert "TO anon" not in sql
+    assert "public.is_workspace_member(workspace_id)" in sql
