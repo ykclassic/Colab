@@ -195,7 +195,7 @@ def test_workspace_http_error_paths_and_secure_listing(monkeypatch: pytest.Monke
     assert client.patch(f"/api/workspaces/{uuid4()}", json={"version": 1, "name": "missing", "product_goal": "missing", "priority": 1, "strategies": []}, headers=headers).status_code == 404
     assert client.post(f"/api/workspaces/{uuid4()}/archive", json={"version": 1}, headers=headers).status_code == 404
     assert client.post(f"/api/workspaces/{uuid4()}/restore", json={"version": 1}, headers=headers).status_code == 404
-    assert client.delete(f"/api/workspaces/{uuid4()}", json={"version": 1}, headers=headers).status_code == 404
+    assert client.request("DELETE", f"/api/workspaces/{uuid4()}", json={"version": 1}, headers=headers).status_code == 404
 
     archived = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": workspace["version"]}, headers=headers)
     assert archived.status_code == 200
