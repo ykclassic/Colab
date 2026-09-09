@@ -35,23 +35,14 @@ class ReproducibilityManifest(BaseModel):
     def model_post_init(self, __context: Any, /) -> None:
         if self.manifest_hash:
             return
-        canonical = repr(
-            (
-                self.dataset_checksum,
-                sorted(self.feature_config.items()),
-                sorted(self.strategy_parameters.items()),
-                self.code_revision,
-                self.dependency_lock_hash,
-                self.random_seed,
-                sorted(self.environment.items()),
-            )
-        )
+        canonical = repr((self.dataset_checksum, sorted(self.feature_config.items()), sorted(self.strategy_parameters.items()), self.code_revision, self.dependency_lock_hash, self.random_seed, sorted(self.environment.items())))
         object.__setattr__(self, "manifest_hash", sha256(canonical.encode()).hexdigest())
 
 
 class StrategyVersion(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     version_id: UUID = Field(default_factory=uuid4)
+    workspace_id: UUID
     name: str = Field(min_length=1, max_length=200)
     version: str = Field(min_length=1, max_length=100)
     artifact_digest: str = Field(min_length=1)
@@ -74,6 +65,7 @@ class PromotionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     decision_id: UUID = Field(default_factory=uuid4)
     version_id: UUID
+    workspace_id: UUID
     from_stage: str
     to_stage: str
     approved: bool
@@ -86,6 +78,7 @@ class PromotionDecision(BaseModel):
 class ReadinessReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     version_id: UUID
+    workspace_id: UUID
     score: float = Field(ge=0, le=100)
     rating: str
     dimensions: dict[str, float]
@@ -115,7 +108,7 @@ class ReleaseGovernance:
     def register_version(self, version: StrategyVersion) -> StrategyVersion:
         if version.version_id in self._versions:
             raise GovernanceError("strategy version ID already exists")
-        if any(v.name == version.name and v.version == version.version for v in self._versions.values()):
+        if any(v.workspace_id == version.workspace_id and v.name == version.name and v.version == version.version for v in self._versions.values()):
             raise GovernanceError("strategy version already registered")
         self._versions[version.version_id] = version
         return version
@@ -127,7 +120,7 @@ class ReleaseGovernance:
             raise GovernanceError("strategy version not found") from exc
 
     def readiness(self, version_id: UUID, gates: tuple[GateResult, ...]) -> ReadinessReport:
-        self.get_version(version_id)
+        version = self.get_version(version_id)
         if not gates:
             raise GovernanceError("at least one gate result is required")
         dimensions = {gate.gate: gate.score for gate in gates}
@@ -141,7 +134,7 @@ class ReleaseGovernance:
             rating = "candidate-ready"
         else:
             rating = "not-ready"
-        return ReadinessReport(version_id=version_id, score=score, rating=rating, dimensions=dimensions, blocking_gates=blocking)
+        return ReadinessReport(version_id=version_id, workspace_id=version.workspace_id, score=score, rating=rating, dimensions=dimensions, blocking_gates=blocking)
 
     def promote(self, version_id: UUID, from_stage: str, to_stage: str, gates: tuple[GateResult, ...]) -> PromotionDecision:
         policy = self.POLICIES.get(to_stage)
@@ -160,20 +153,12 @@ class ReleaseGovernance:
                 reasons.append(f"required gate failed: {required}")
         if report.score < policy.minimum_score:
             reasons.append(f"readiness score {report.score:.2f} is below {policy.minimum_score:.2f}")
-        decision = PromotionDecision(
-            version_id=version_id,
-            from_stage=from_stage,
-            to_stage=to_stage,
-            approved=not reasons,
-            readiness_score=report.score,
-            gates=gates,
-            reasons=tuple(reasons),
-        )
+        decision = PromotionDecision(version_id=version_id, workspace_id=report.workspace_id, from_stage=from_stage, to_stage=to_stage, approved=not reasons, readiness_score=report.score, gates=gates, reasons=tuple(reasons))
         self._decisions.append(decision)
         return decision
 
-    def decisions(self) -> tuple[PromotionDecision, ...]:
-        return tuple(self._decisions)
+    def decisions(self, workspace_id: UUID | None = None) -> tuple[PromotionDecision, ...]:
+        return tuple(item for item in self._decisions if workspace_id is None or item.workspace_id == workspace_id)
 
-    def versions(self) -> tuple[StrategyVersion, ...]:
-        return tuple(self._versions.values())
+    def versions(self, workspace_id: UUID | None = None) -> tuple[StrategyVersion, ...]:
+        return tuple(item for item in self._versions.values() if workspace_id is None or item.workspace_id == workspace_id)
