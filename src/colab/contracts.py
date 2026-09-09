@@ -87,6 +87,7 @@ class WorkflowState(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     workflow_id: UUID = Field(default_factory=uuid4)
+    workspace_id: UUID | None = None
     schema_version: str = "1.0"
     product_goal: str = Field(min_length=1)
     product_brief: dict[str, Any] = Field(default_factory=dict)
