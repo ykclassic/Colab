@@ -7,14 +7,14 @@ experiment tracking. It never places trades or mutates workflow state.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from itertools import product
 from math import sqrt
 from statistics import mean, pstdev
-from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,7 +34,7 @@ class MarketBar(BaseModel):
     close: float = Field(gt=0)
     volume: float = Field(ge=0)
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: Any, /) -> None:
         if self.high < max(self.open, self.close) or self.low > min(self.open, self.close):
             raise ValueError("OHLC bounds are invalid")
 
@@ -47,7 +47,7 @@ class MarketDataset(BaseModel):
     source: str = Field(default="research_upload", min_length=1, max_length=200)
     checksum: str = ""
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: Any, /) -> None:
         previous: datetime | None = None
         for bar in self.bars:
             if bar.symbol != self.symbol:
@@ -209,10 +209,7 @@ class FeatureEngineer:
             else:
                 values["volume_zscore_20"] = 0.0
             for window in normalized:
-                if index + 1 >= window:
-                    values[f"sma_{window}"] = mean(closes[index - window + 1 : index + 1])
-                else:
-                    values[f"sma_{window}"] = float("nan")
+                values[f"sma_{window}"] = mean(closes[index - window + 1 : index + 1]) if index + 1 >= window else float("nan")
             rows.append(FeatureRow(timestamp=bar.timestamp, symbol=bar.symbol, values=values))
         return FeatureSet(
             name="causal_market_features",
@@ -298,7 +295,7 @@ class Backtester:
         annualized = (equity[-1] / initial) ** (252 / periods) - 1 if equity[-1] > 0 else -1
         returns = [equity[i] / equity[i - 1] - 1 for i in range(1, len(equity)) if equity[i - 1] > 0]
         volatility = pstdev(returns) * sqrt(252) if len(returns) > 1 else 0.0
-        sharpe = (mean(returns) / pstdev(returns) * sqrt(252)) if len(returns) > 1 and pstdev(returns) else 0.0
+        sharpe = mean(returns) / pstdev(returns) * sqrt(252) if len(returns) > 1 and pstdev(returns) else 0.0
         peak = equity[0]
         drawdown = 0.0
         for value in equity:
@@ -342,44 +339,39 @@ class WalkForwardEvaluator:
             train_ds = MarketDataset(symbol=dataset.symbol, bars=dataset.bars[start : start + train_size], source=dataset.source)
             train_fs = FeatureEngineer().build(train_ds)
             sweep = ParameterSweeper().run(uuid4(), train_ds, train_fs, signal, parameter_grid, objective=objective)
-            assert sweep.best_index is not None
-            chosen = sweep.results[sweep.best_index].parameters
+            best = sweep.results[sweep.best_index or 0]
             test_start = start + train_size
             test_end = test_start + test_size
-            test_ds = MarketDataset(symbol=dataset.symbol, bars=dataset.bars[test_start : test_end], source=dataset.source)
+            test_ds = MarketDataset(symbol=dataset.symbol, bars=dataset.bars[test_start:test_end], source=dataset.source)
             test_fs = FeatureEngineer().build(test_ds)
-            result = Backtester().run(test_ds, test_fs, signal, chosen)
-            windows.append(WalkForwardWindow(train_start=start, train_end=start + train_size, test_start=test_start, test_end=test_end, test_metrics=result.metrics, parameters=chosen))
-            oos_equity.extend(result.equity_curve)
-            oos_trades.extend(result.trades)
+            tested = Backtester().run(test_ds, test_fs, signal, best.parameters)
+            windows.append(WalkForwardWindow(train_start=start, train_end=start + train_size, test_start=test_start, test_end=test_end, test_metrics=tested.metrics, parameters=best.parameters))
+            oos_equity.extend(tested.equity_curve)
+            oos_trades.extend(tested.trades)
             start += test_size
-        if not windows:
-            raise QuantLabError("walk-forward produced no windows")
-        stitched = Backtester._metrics(100_000, oos_equity, oos_trades, 0, max(1, len(oos_equity))) if oos_equity else BacktestMetrics(total_return=0, annualized_return=0, annualized_volatility=0, sharpe=0, max_drawdown=0, win_rate=0, profit_factor=0, trade_count=0, exposure=0)
+        stitched = Backtester._metrics(100_000.0, oos_equity, oos_trades, 0, max(1, len(oos_equity)))
         return WalkForwardResult(windows=tuple(windows), stitched_metrics=stitched, oos_observations=len(oos_equity))
 
 
-@dataclass(frozen=True)
 class QuantitativeResearchLab:
-    """Facade composing dataset, features, backtest, sweep, OOS, and tracking."""
-    tracker: ExperimentTracker = field(default_factory=ExperimentTracker)
+    """Facade for research operations and experiment tracking."""
 
-    def features(self, dataset: MarketDataset, windows: Sequence[int] = (5, 20)) -> FeatureSet:
-        return FeatureEngineer().build(dataset, windows)
+    def __init__(self) -> None:
+        self._tracker = ExperimentTracker()
 
-    def backtest(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, parameters: Mapping[str, Any]) -> BacktestResult:
-        return Backtester().run(dataset, features, signal, parameters)
+    def backtest(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, parameters: Mapping[str, Any], *, initial_capital: float = 100_000.0) -> BacktestResult:
+        return Backtester().run(dataset, features, signal, parameters, initial_capital=initial_capital)
 
-    def sweep(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, grid: Mapping[str, Sequence[Any]], objective: str = "sharpe") -> SweepResult:
+    def sweep(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, grid: Mapping[str, Sequence[Any]], *, objective: str = "sharpe") -> SweepResult:
         experiment_id = uuid4()
         result = ParameterSweeper().run(experiment_id, dataset, features, signal, grid, objective=objective)
-        self.tracker.record(ExperimentRecord(name="parameter_sweep", dataset_checksum=dataset.checksum, feature_set=features.name, strategy=getattr(signal, "__name__", "strategy"), parameters={k: list(v) for k, v in grid.items()}, result_type="sweep", result=result.model_dump(mode="json"), tags=("sweep",)))
+        self._tracker.record(ExperimentRecord(experiment_id=experiment_id, name="parameter_sweep", dataset_checksum=dataset.checksum, feature_set=features.name, strategy=getattr(signal, "__name__", "strategy"), parameters={key: list(value) for key, value in grid.items()}, result_type="sweep", result=result.model_dump(mode="json")))
         return result
 
-    def walk_forward(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, grid: Mapping[str, Sequence[Any]], train_size: int, test_size: int, objective: str = "sharpe") -> WalkForwardResult:
-        result = WalkForwardEvaluator().run(dataset, features, signal, grid, train_size=train_size, test_size=test_size, objective=objective)
-        self.tracker.record(ExperimentRecord(name="walk_forward_oos", dataset_checksum=dataset.checksum, feature_set=features.name, strategy=getattr(signal, "__name__", "strategy"), parameters={k: list(v) for k, v in grid.items()}, result_type="walk_forward", result=result.model_dump(mode="json"), tags=("walk-forward", "oos")))
+    def walk_forward(self, dataset: MarketDataset, features: FeatureSet, signal: SignalFunction, parameter_grid: Mapping[str, Sequence[Any]], *, train_size: int, test_size: int, objective: str = "sharpe") -> WalkForwardResult:
+        result = WalkForwardEvaluator().run(dataset, features, signal, parameter_grid, train_size=train_size, test_size=test_size, objective=objective)
+        self._tracker.record(ExperimentRecord(name="walk_forward", dataset_checksum=dataset.checksum, feature_set=features.name, strategy=getattr(signal, "__name__", "strategy"), parameters={key: list(value) for key, value in parameter_grid.items()}, result_type="walk_forward", result=result.model_dump(mode="json")))
         return result
 
     def experiments(self) -> tuple[ExperimentRecord, ...]:
-        return self.tracker.list()
+        return self._tracker.list()
