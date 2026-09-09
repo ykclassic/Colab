@@ -65,9 +65,8 @@ def test_authentication_edge_cases_and_test_auth_gate(monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("COLAB_JWT_SECRET", "test-secret")
+    token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS256", headers={"alg": "RS256"})
     with pytest.raises(ValueError, match="unsupported local JWT algorithm"):
-        token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS384")
-        monkeypatch.delenv("COLAB_JWT_SECRET")
         authenticate_bearer(token)
 
     monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "false")
