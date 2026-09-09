@@ -199,6 +199,7 @@ def test_workspace_http_error_paths_and_secure_listing(monkeypatch: pytest.Monke
 
     archived = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": workspace["version"]}, headers=headers)
     assert archived.status_code == 200
-    assert client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": archived.json()["version"]}, headers=headers).status_code == 200
-    restored = client.post(f"/api/workspaces/{workspace_id}/restore", json={"version": archived.json()["version"] + 1}, headers=headers)
+    archived_again = client.post(f"/api/workspaces/{workspace_id}/archive", json={"version": archived.json()["version"]}, headers=headers)
+    assert archived_again.status_code == 200
+    restored = client.post(f"/api/workspaces/{workspace_id}/restore", json={"version": archived_again.json()["version"]}, headers=headers)
     assert restored.status_code == 200
