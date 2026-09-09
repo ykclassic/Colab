@@ -19,6 +19,7 @@ def test_quant_backtest_endpoint():
             "volume": 1000,
         })
     response = TestClient(create_app()).post("/api/quant/backtest", json={
+        "workspace_id": "00000000-0000-0000-0000-000000000001",
         "symbol": "API", "bars": bars, "fast_window": 3, "slow_window": 10,
     })
     assert response.status_code == 200
@@ -29,6 +30,7 @@ def test_quant_backtest_endpoint():
 
 def test_quant_backtest_rejects_lookahead_window_order():
     response = TestClient(create_app()).post("/api/quant/backtest", json={
+        "workspace_id": "00000000-0000-0000-0000-000000000001",
         "symbol": "API", "bars": [
             {"timestamp": "2025-01-01T00:00:00Z", "symbol": "API", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1},
             {"timestamp": "2025-01-02T00:00:00Z", "symbol": "API", "open": 100, "high": 101, "low": 99, "close": 101, "volume": 1},
