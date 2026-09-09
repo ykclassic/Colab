@@ -25,11 +25,11 @@ class FakeCursor:
             self.rowcount = 1
         elif "select * from public.governance_strategy_versions where version_id" in normalized:
             self.row = self.state["version"]  # type: ignore[assignment]
-        elif "select * from public.governance_strategy_versions order by" in normalized:
+        elif "select * from public.governance_strategy_versions" in normalized and "order by" in normalized:
             self.rows = [self.state["version"]]  # type: ignore[list-item]
         elif normalized.startswith(("insert into public.governance_readiness_reports", "insert into public.governance_gate_results", "insert into public.governance_promotion_decisions")):
             self.rowcount = 1
-        elif "select * from public.governance_promotion_decisions order by" in normalized:
+        elif "select * from public.governance_promotion_decisions" in normalized and "order by" in normalized:
             self.rows = [self.state["decision"]]  # type: ignore[list-item]
         elif "select * from public.governance_approvals where approval_id" in normalized:
             self.row = self.state["approval"]  # type: ignore[assignment]
