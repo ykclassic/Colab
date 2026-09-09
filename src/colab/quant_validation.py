@@ -1,6 +1,7 @@
 """Scientific validation gates for quantitative research experiments."""
 from __future__ import annotations
 
+from collections import pairwise
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -51,9 +52,9 @@ class QuantScientificValidator:
         timestamps = [bar.timestamp for bar in dataset.bars]
         findings.append(self._check("timestamp_data_leakage", all(ts.tzinfo is not None and ts.utcoffset() is not None for ts in timestamps), "All market timestamps must be timezone-aware."))
         findings.append(self._check("duplicate_data", len(timestamps) == len(set(timestamps)), "Duplicate timestamps are not allowed."))
-        findings.append(self._check("chronology", all(a < b for a, b in zip(timestamps, timestamps[1:])), "Market bars must be strictly chronological."))
+        findings.append(self._check("chronology", all(a < b for a, b in pairwise(timestamps)), "Market bars must be strictly chronological."))
         if expected_interval is not None and len(timestamps) > 1:
-            gaps = [b - a for a, b in zip(timestamps, timestamps[1:])]
+            gaps = [b - a for a, b in pairwise(timestamps)]
             stale = sum(1 for gap in gaps if gap > expected_interval * (max_stale_intervals + 1))
             findings.append(self._check("missing_stale_data", stale == 0, "Detected gaps beyond the configured stale-data tolerance."))
         else:
@@ -68,7 +69,7 @@ class QuantScientificValidator:
         findings.append(self._check("spread_slippage", commission_bps >= 0 and slippage_bps > 0, "Backtests must model non-negative commissions and positive slippage."))
         findings.append(self._check("realistic_fills", execution_timing == "next_bar_open" and bool(meta.get("fill_policy")), "Execution must use an explicit causal fill policy rather than current-bar hindsight."))
         findings.append(self._check("stale_data_policy", bool(meta.get("stale_data_policy")), "Record how stale observations are detected and handled."))
-        findings.append(self._check("feature_timestamp_alignment", all(row.timestamp == bar.timestamp for row, bar in zip(features.rows, dataset.bars)), "Feature timestamps must exactly align to source bars."))
+        findings.append(self._check("feature_timestamp_alignment", all(row.timestamp == bar.timestamp for row, bar in zip(features.rows, dataset.bars, strict=True)), "Feature timestamps must exactly align to source bars."))
 
         canonical = "|".join(f"{x.check}:{x.passed}:{x.severity}:{x.message}" for x in findings)
         return ScientificValidation(passed=all(x.passed for x in findings), findings=tuple(findings), validation_hash=sha256(canonical.encode()).hexdigest())
