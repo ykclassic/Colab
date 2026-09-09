@@ -16,7 +16,7 @@ class PostgresQuantVerticalSliceStore:
     def save(self, result: dict[str, Any]) -> str:
         validation = result["scientific_validation"]
         experiment = result["experiment"]
-        digest = result["reproducibility_hash"]
+        digest = str(result["reproducibility_hash"])
         with self._connection_factory() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO public.quant_research_runs
@@ -36,5 +36,8 @@ class PostgresQuantVerticalSliceStore:
                 "SELECT run_id,workspace_id,dataset_id,strategy_id,experiment_id,experiment_hash,validation_hash,reproducibility_hash,created_at FROM public.quant_research_runs WHERE workspace_id=%s ORDER BY created_at DESC",
                 (workspace_id,),
             )
-            columns = [desc.name for desc in cur.description]
+            description = cur.description
+            if description is None:
+                return []
+            columns = [column.name for column in description]
             return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
