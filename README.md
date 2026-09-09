@@ -23,6 +23,16 @@ Phase 3 adds:
 - Versioned knowledge documents with deterministic lexical search and an interface suitable for a future vector backend.
 - PostgreSQL schema for durable workspace, artifact, knowledge, and tool metadata with RLS enabled and browser roles denied until identity-aware policies exist.
 
+## Phase 12 — Controlled External Integration
+
+Phase 12 adds a narrowly scoped external integration gateway for read-only data/tool access. Connectors are HTTPS-only, host/path allow-listed, timeout- and response-size-bounded, server-secret based, and audited. Trading, order, transfer, withdrawal, and execution capabilities are explicitly prohibited at this boundary.
+
+Any future trading integration must remain behind the independent boundary:
+
+`Strategy Engine → Independent Risk Engine → Human Approval → Isolated Execution Gateway`
+
+Agents never receive arbitrary network access, provider credentials, or direct execution authority.
+
 ## Development
 
 Python 3.12+
