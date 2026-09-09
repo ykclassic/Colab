@@ -19,6 +19,7 @@ const links = [
   ['Artifacts', '/artifacts'],
   ['Operations', '/operations'],
   ['Governance', '/governance'],
+  ['Release Governance', '/governance/release'],
 ];
 
 export function Nav() {
@@ -27,7 +28,7 @@ export function Nav() {
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">C</span><div><strong>COLAB</strong><small>Command Center</small></div></div>
       <nav>{links.map(([label, href]) => <Link className={pathname === href ? 'active' : ''} href={href} key={href}>{label}</Link>)}</nav>
-      <div className="sidebar-foot"><span className="status-dot" /> Platform online<br /><small>Phase 10 · quantitative research control plane</small></div>
+      <div className="sidebar-foot"><span className="status-dot" /> Platform online<br /><small>Phase 11 · production validation & release governance</small></div>
     </aside>
   );
 }
