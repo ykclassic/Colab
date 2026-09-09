@@ -15,7 +15,15 @@ from .quant_lab import (
     SignalFunction,
     WalkForwardResult,
 )
-from .quant_platform import ExperimentRecord, StrategyRecord, experiment_hash, monte_carlo, portfolio_risk, robustness_analysis, stress_test
+from .quant_platform import (
+    ExperimentRecord,
+    StrategyRecord,
+    experiment_hash,
+    monte_carlo,
+    portfolio_risk,
+    robustness_analysis,
+    stress_test,
+)
 from .quant_validation import QuantScientificValidator, ScientificValidation
 
 
