@@ -1,48 +1,5 @@
 'use client';
-
 import { useState } from 'react';
-
-const sampleBars = Array.from({ length: 60 }, (_, i) => {
-  const close = 100 + i * 0.25 + (i % 9 === 0 ? 2 : 0);
-  return {
-    timestamp: new Date(Date.UTC(2025, 0, 1 + i)).toISOString(), symbol: 'RESEARCH',
-    open: close - 0.1, high: close + 0.5, low: close - 0.5, close, volume: 1000 + i * 10,
-  };
-});
-
-export default function QuantLabPage() {
-  const [fast, setFast] = useState(5);
-  const [slow, setSlow] = useState(20);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function runBacktest() {
-    setBusy(true);
-    try {
-      const response = await fetch('/api/quant/backtest', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ symbol: 'RESEARCH', bars: sampleBars, fast_window: fast, slow_window: slow }),
-      });
-      setResult(await response.json());
-    } finally { setBusy(false); }
-  }
-
-  const metrics = (result?.result as { metrics?: Record<string, number> } | undefined)?.metrics;
-  return (
-    <main>
-      <div className="page-head"><div><p className="eyebrow">PHASE 10</p><h1>Quantitative Research Lab</h1><p>Feature engineering, backtesting, parameter experiments and walk-forward/OOS research in an isolated research plane.</p></div></div>
-      <section className="card">
-        <div className="section"><h2>Moving-average experiment</h2></div>
-        <div className="grid grid-2">
-          <label>Fast window<input type="number" min={2} max={250} value={fast} onChange={e => setFast(Number(e.target.value))} /></label>
-          <label>Slow window<input type="number" min={3} max={500} value={slow} onChange={e => setSlow(Number(e.target.value))} /></label>
-        </div>
-        <div className="actions"><button className="button" disabled={busy || fast >= slow} onClick={runBacktest}>{busy ? 'Running…' : 'Run backtest'}</button></div>
-      </section>
-      {metrics && <section className="section"><div className="card"><h2>Backtest results</h2><div className="grid grid-4">
-        {Object.entries(metrics).map(([key, value]) => <div className="panel" key={key}><span className="label">{key.replaceAll('_', ' ')}</span><div className="metric">{typeof value === 'number' ? value.toFixed(4) : String(value)}</div></div>)}
-      </div></div></section>}
-      {result && <section className="section"><div className="card"><h2>Experiment evidence</h2><p className="muted">Dataset checksum: <code>{String(result.dataset_checksum)}</code></p><p className="notice">Research-only control plane. No trade execution is exposed by this experiment.</p></div></section>}
-    </main>
-  );
-}
+const bars=Array.from({length:160},(_,i)=>{const close=100+i*.12+Math.sin(i/5)*2;return{timestamp:new Date(Date.UTC(2025,0,1+i)).toISOString(),symbol:'RESEARCH',open:close-.1,high:close+.5,low:close-.5,close,volume:1000+i*10}});
+const returns=[.012,-.006,.008,.004,-.011,.015,.003,-.004,.009,-.002];
+export default function QuantPlatformPage(){const[w,setW]=useState('');const[f,setF]=useState(5);const[s,setS]=useState(20);const[r,setR]=useState<Record<string,unknown>|null>(null);const[b,setB]=useState(false);const[e,setE]=useState('');async function post(path:string,body:unknown){setB(true);setE('');try{const x=await fetch('/api/quant/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const d=await x.json();if(!x.ok)throw new Error(d.detail||'Request failed');setR(d)}catch(x){setE(x instanceof Error?x.message:'Request failed')}finally{setB(false)}}return <main><div className="page-head"><div><p className="eyebrow">PHASE 18</p><h1>Quant Platform</h1><p>Strategy registry, durable experiments, full walk-forward/OOS validation, portfolio risk, stress testing, Monte Carlo and robustness.</p></div></div><section className="card"><h2>Walk-forward / OOS</h2><div className="grid grid-3"><label>Fast<input type="number" value={f} onChange={x=>setF(Number(x.target.value))}/></label><label>Slow<input type="number" value={s} onChange={x=>setS(Number(x.target.value))}/></label><label>Workspace ID<input value={w} onChange={x=>setW(x.target.value)} placeholder="Required for analytics"/></label></div><div className="actions"><button className="button" disabled={b||f>=s} onClick={()=>post('backtest',{symbol:'RESEARCH',bars,fast_window:f,slow_window:s})}>Run backtest</button><button className="button" disabled={b||f>=s} onClick={()=>post('walk-forward',{symbol:'RESEARCH',bars,fast_window:f,slow_window:s,train_size:100,test_size:20,fast_candidates:[3,5,10],slow_candidates:[20,30,50]})}>Run walk-forward / OOS</button></div><p className="muted">Parameter selection uses training observations only; subsequent test windows remain out-of-sample.</p></section><section className="card"><h2>Risk & robustness</h2><div className="actions"><button className="button" disabled={b||!w} onClick={()=>post('risk',{workspace_id:w,returns})}>Portfolio risk</button><button className="button" disabled={b||!w} onClick={()=>post('monte-carlo',{workspace_id:w,returns,simulations:1000,horizon:100,seed:42})}>Monte Carlo</button><button className="button" disabled={b||!w} onClick={()=>post('robustness',{workspace_id:w,returns,perturbations:100,seed:42,min_sharpe:0})}>Robustness</button></div><p className="muted">Research-only control plane. No trade execution is exposed.</p></section>{e&&<p role="alert" className="notice">{e}</p>}{r&&<section className="card"><h2>Result</h2><pre style={{overflow:'auto'}}>{JSON.stringify(r,null,2)}</pre></section>}</main>}

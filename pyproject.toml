@@ -59,4 +59,6 @@ omit = [
   "src/colab/release_governance_api.py",
   "src/colab/research_platform_persistence.py",
   "src/colab/research_platform_api.py",
+  "src/colab/quant_persistence.py",
+  "src/colab/quant_api.py",
 ]
