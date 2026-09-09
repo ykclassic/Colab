@@ -6,7 +6,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from colab.external_integration import ConnectorDefinition, ExternalIntegrationError, ExternalIntegrationRegistry
+from colab.external_integration import (
+    ConnectorDefinition,
+    ExternalIntegrationError,
+    ExternalIntegrationRegistry,
+)
 from colab.external_integration_api import register_external_integration_routes
 
 
