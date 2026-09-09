@@ -13,20 +13,15 @@ from colab.durable_workflow_governance import (
     GovernanceState,
     GovernanceStateError,
     expiry_after,
+    require_workflow_replay_access,
     verify_workflow_replay,
 )
+from colab.security import AuthorizationError, Permission, PlatformRole, Principal
 from colab.workflow_integrity import WorkflowIntegrityError, state_hash
 
 
 def _event(sequence: int, previous: str | None, source: Stage, target: Stage, digest: str, snapshot_version: int) -> dict[str, object]:
-    return {
-        "sequence_no": sequence,
-        "previous_state_hash": previous,
-        "resulting_state_hash": digest,
-        "from_stage": source.value,
-        "to_stage": target.value,
-        "snapshot_version": snapshot_version,
-    }
+    return {"sequence_no": sequence, "previous_state_hash": previous, "resulting_state_hash": digest, "from_stage": source.value, "to_stage": target.value, "snapshot_version": snapshot_version}
 
 
 def _workflow() -> WorkflowState:
@@ -35,18 +30,8 @@ def _workflow() -> WorkflowState:
 
 def test_full_governance_lifecycle_is_deterministic_and_append_only() -> None:
     now = datetime(2026, 9, 9, tzinfo=UTC)
-    machine = DurableGovernanceStateMachine(
-        binding=ApprovalBinding(uuid4(), uuid4(), uuid4(), "artifact-v1", "risk-v1", "inputs-v1")
-    )
-    expected = [
-        GovernanceState.DRAFT,
-        GovernanceState.SUBMITTED,
-        GovernanceState.RISK_REVIEW,
-        GovernanceState.RISK_APPROVED,
-        GovernanceState.HUMAN_REVIEW,
-        GovernanceState.APPROVED,
-        GovernanceState.PROMOTED,
-    ]
+    machine = DurableGovernanceStateMachine(binding=ApprovalBinding(uuid4(), uuid4(), uuid4(), "artifact-v1", "risk-v1", "inputs-v1"))
+    expected = [GovernanceState.DRAFT, GovernanceState.SUBMITTED, GovernanceState.RISK_REVIEW, GovernanceState.RISK_APPROVED, GovernanceState.HUMAN_REVIEW, GovernanceState.APPROVED, GovernanceState.PROMOTED]
     for index, target in enumerate(expected):
         machine.transition(target, "actor", now=now + timedelta(minutes=index))
     machine.verify_event_chain()
@@ -93,16 +78,9 @@ def test_rejection_invalidation_supersession_and_expiry_paths() -> None:
     assert expired.state == GovernanceState.EXPIRED
 
 
-def test_approved_governance_is_invalidated_when_any_bound_digest_changes() -> None:
+def test_approved_governance_is_invalidated_when_bound_input_digest_changes() -> None:
     machine = DurableGovernanceStateMachine(binding=ApprovalBinding(uuid4(), uuid4(), uuid4(), "artifact-a", "risk-a", "digest-a"))
-    for state in (
-        GovernanceState.DRAFT,
-        GovernanceState.SUBMITTED,
-        GovernanceState.RISK_REVIEW,
-        GovernanceState.RISK_APPROVED,
-        GovernanceState.HUMAN_REVIEW,
-        GovernanceState.APPROVED,
-    ):
+    for state in (GovernanceState.DRAFT, GovernanceState.SUBMITTED, GovernanceState.RISK_REVIEW, GovernanceState.RISK_APPROVED, GovernanceState.HUMAN_REVIEW, GovernanceState.APPROVED):
         machine.transition(state, "actor")
     machine.invalidate_for_input_change("digest-b", "strategy parameters changed")
     assert machine.state == GovernanceState.INVALIDATED
@@ -115,8 +93,7 @@ def test_governance_event_tampering_is_detected() -> None:
     machine = DurableGovernanceStateMachine()
     machine.transition(GovernanceState.DRAFT, "creator")
     machine.transition(GovernanceState.SUBMITTED, "creator")
-    original = machine.events
-    object.__setattr__(original[0], "reason", "tampered")
+    object.__setattr__(machine.events[0], "reason", "tampered")
     with pytest.raises(WorkflowIntegrityError):
         machine.verify_event_chain()
 
@@ -127,16 +104,8 @@ def test_workflow_replay_accepts_complete_chain_and_rejects_tampering() -> None:
     state_v2 = original.model_copy(update={"current_stage": Stage.DECOMPOSITION}, deep=True)
     state_v3 = state_v2.model_copy(update={"current_stage": Stage.RESEARCH}, deep=True)
     digest1, digest2, digest3 = state_hash(state_v1), state_hash(state_v2), state_hash(state_v3)
-    snapshots = [
-        {"version": 1, "state": state_v1.model_dump(mode="json"), "state_hash": digest1},
-        {"version": 2, "state": state_v2.model_dump(mode="json"), "state_hash": digest2},
-        {"version": 3, "state": state_v3.model_dump(mode="json"), "state_hash": digest3},
-    ]
-    events = [
-        _event(1, None, Stage.INTAKE, Stage.INTAKE, digest1, 1),
-        _event(2, digest1, Stage.INTAKE, Stage.DECOMPOSITION, digest2, 2),
-        _event(3, digest2, Stage.DECOMPOSITION, Stage.RESEARCH, digest3, 3),
-    ]
+    snapshots = [{"version": 1, "state": state_v1.model_dump(mode="json"), "state_hash": digest1}, {"version": 2, "state": state_v2.model_dump(mode="json"), "state_hash": digest2}, {"version": 3, "state": state_v3.model_dump(mode="json"), "state_hash": digest3}]
+    events = [_event(1, None, Stage.INTAKE, Stage.INTAKE, digest1, 1), _event(2, digest1, Stage.INTAKE, Stage.DECOMPOSITION, digest2, 2), _event(3, digest2, Stage.DECOMPOSITION, Stage.RESEARCH, digest3, 3)]
     replayed = verify_workflow_replay(original, snapshots, events)
     assert replayed.current_stage == Stage.RESEARCH
     events[2]["resulting_state_hash"] = "0" * 64
@@ -152,3 +121,19 @@ def test_workflow_replay_cannot_cross_workflow_identity() -> None:
     events = [_event(1, None, Stage.INTAKE, Stage.INTAKE, digest, 1)]
     with pytest.raises(WorkflowIntegrityError):
         verify_workflow_replay(original, snapshots, events)
+
+
+def test_workflow_replay_requires_audit_permission_and_workspace_membership(monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace_id = uuid4()
+    principal = Principal(user_id=str(uuid4()), role=PlatformRole.RESEARCHER)
+    with pytest.raises(AuthorizationError):
+        require_workflow_replay_access(principal, workspace_id, lambda: None)  # type: ignore[arg-type]
+
+    reviewer = Principal(user_id=str(uuid4()), role=PlatformRole.REVIEWER)
+    monkeypatch.setattr("colab.durable_workflow_governance.membership_role", lambda *_: None)
+    with pytest.raises(AuthorizationError):
+        require_workflow_replay_access(reviewer, workspace_id, lambda: None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("colab.durable_workflow_governance.membership_role", lambda *_: "reviewer")
+    require_workflow_replay_access(reviewer, workspace_id, lambda: None)  # type: ignore[arg-type]
+    assert reviewer.can(Permission.AUDIT_READ)
