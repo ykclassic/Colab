@@ -7,13 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
-from .productization import (
-    ArtifactRecord,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    Workspace,
-)
+from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
 
 type WorkspaceList = builtins.list[Workspace]
 type ArtifactList = builtins.list[ArtifactRecord]
@@ -39,7 +33,7 @@ class ArtifactService(Protocol):
 
 class KnowledgeService(Protocol):
     def upsert(self, document: KnowledgeDocument) -> KnowledgeDocument: ...
-    def search(self, query: str, limit: int = 10) -> KnowledgeList: ...
+    def search(self, query: str, limit: int = 10, workspace_id: UUID | None = None) -> KnowledgeList: ...
 
 
 class ToolService(Protocol):
