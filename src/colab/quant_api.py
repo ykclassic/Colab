@@ -12,8 +12,8 @@ from .quant_lab import (
     FeatureEngineer,
     MarketBar,
     MarketDataset,
-    QuantLabError,
     QuantitativeResearchLab,
+    QuantLabError,
 )
 
 
