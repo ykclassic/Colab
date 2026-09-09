@@ -6,8 +6,22 @@ from uuid import uuid4
 
 import pytest
 
-from colab.contracts import AgentRole, AgentTask, Artifact, Decision, RiskAssessment, Stage, WorkflowState
-from colab.persistence import ConcurrentWorkflowUpdate, PersistenceError, PostgresWorkflowRepository, WorkflowNotFound, connection_factory_from_dsn
+from colab.contracts import (
+    AgentRole,
+    AgentTask,
+    Artifact,
+    Decision,
+    RiskAssessment,
+    Stage,
+    WorkflowState,
+)
+from colab.persistence import (
+    ConcurrentWorkflowUpdate,
+    PersistenceError,
+    PostgresWorkflowRepository,
+    WorkflowNotFound,
+    connection_factory_from_dsn,
+)
 from colab.workflow_integrity import WorkflowIntegrityError, state_hash
 
 
