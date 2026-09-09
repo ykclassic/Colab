@@ -13,8 +13,9 @@ import socket
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
@@ -76,7 +77,7 @@ class ExternalIntegrationRegistry:
             raise ExternalIntegrationError(f"connector already registered: {definition.name}")
         self._connectors[definition.name] = definition
 
-    def list(self) -> tuple[ConnectorDefinition, ...]:
+    def list_connectors(self) -> tuple[ConnectorDefinition, ...]:
         return tuple(self._connectors.values())
 
     def get(self, name: str) -> ConnectorDefinition:
@@ -135,7 +136,6 @@ class ExternalIntegrationRegistry:
             ip = ipaddress.ip_address(address)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
                 raise ExternalIntegrationError("private or non-public connector address is prohibited")
-        from urllib.parse import urlencode
         final_url = target + ("?" + urlencode(query) if query else "")
         headers = {"Accept": "application/json", "User-Agent": "Colab-Controlled-Integration/1.0"}
         secret = os.getenv(definition.secret_env) if definition.secret_env else None
@@ -143,7 +143,7 @@ class ExternalIntegrationRegistry:
             headers["Authorization"] = f"Bearer {secret}"
         request = Request(final_url, headers=headers, method="GET")
         with urlopen(request, timeout=definition.timeout_seconds) as response:
-            return response.read(definition.max_response_bytes + 1)
+            return cast(bytes, response.read(definition.max_response_bytes + 1))
 
     def _record(self, request_id: UUID, connector: str, path: str, status_code: int | None, success: bool, error: str | None) -> None:
         self._audit.append(IntegrationAudit(request_id, connector, path, status_code, success, datetime.now(UTC), error))
