@@ -208,3 +208,6 @@ def register_quant_routes(app: Any) -> None:
         return robustness_analysis(payload.returns, payload.perturbations, payload.seed, payload.min_sharpe).model_dump()
 
     app.include_router(router)
+
+    from .agent_platform_api import register_agent_routes
+    register_agent_routes(app)
