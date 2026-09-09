@@ -38,6 +38,9 @@ line-length = 100
 target-version = "py312"
 ignore = ["E501", "RUF012"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/colab/quant_lab.py" = ["F401"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

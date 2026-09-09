@@ -1,0 +1,1 @@
+export default function LiveTradingPage(){return <main><div className="page-head"><div><p className="eyebrow">FUTURE PHASE</p><h1>Live Trading</h1><p>Reserved for a future governed execution integration.</p></div></div><div className="card"><div className="notice">Not enabled. Quantitative research results cannot directly authorize or execute live trades.</div></div></main>}
