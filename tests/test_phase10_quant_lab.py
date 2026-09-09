@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from math import isnan
 
 import pytest
 
@@ -8,8 +9,8 @@ from colab.quant_lab import (
     MarketBar,
     MarketDataset,
     ParameterSweeper,
-    QuantLabError,
     QuantitativeResearchLab,
+    QuantLabError,
     WalkForwardEvaluator,
 )
 
@@ -36,7 +37,7 @@ def signal(context):
     values = context.features.rows[context.index].values
     fast = values.get(f"sma_{context.parameters.get('fast', 5)}")
     slow = values.get(f"sma_{context.parameters.get('slow', 20)}")
-    if fast != fast or slow != slow:
+    if fast is None or slow is None or isnan(fast) or isnan(slow):
         return 0.0
     return 1.0 if fast > slow else 0.0
 
@@ -46,7 +47,7 @@ def test_dataset_checksum_and_causal_features():
     fs = FeatureEngineer().build(ds, (5, 20))
     assert len(fs.rows) == len(ds.bars)
     assert fs.dataset_checksum == ds.checksum
-    assert fs.rows[0].values["return_1"] != fs.rows[0].values["return_1"]
+    assert isnan(fs.rows[0].values["return_1"])
     assert fs.rows[19].values["sma_20"] == pytest.approx(sum(b.close for b in ds.bars[:20]) / 20)
 
 
