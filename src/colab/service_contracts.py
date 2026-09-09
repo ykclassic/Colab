@@ -7,7 +7,13 @@ from typing import Protocol
 from uuid import UUID
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
-from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
+from .productization import (
+    ArtifactRecord,
+    KnowledgeDocument,
+    StrategySpec,
+    ToolDefinition,
+    Workspace,
+)
 
 type WorkspaceList = builtins.list[Workspace]
 type ArtifactList = builtins.list[ArtifactRecord]
