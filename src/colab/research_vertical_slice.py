@@ -12,9 +12,9 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from .research_platform import (
     CitationValidation,
     DatasetRecord,
-    RetrievalCandidate,
     ResearchPlatformError,
     ResearchReport,
+    RetrievalCandidate,
     TextExtractionPipeline,
     build_report,
     citation_id_for,
@@ -99,13 +99,10 @@ class ResearchVerticalSlice:
         if limit < 1 or candidate_limit < limit:
             raise ValueError("candidate_limit must be >= limit and both must be positive")
 
-        # Upload -> Extract -> Normalize.
         extracted, extractor_version = self.extractor.extract(content, media_type, filename)
         normalized = self._normalize(extracted)
         normalized_hash = sha256(normalized.encode("utf-8")).hexdigest()
         extraction_hash = sha256(extracted.encode("utf-8")).hexdigest()
-
-        # Version: dataset identity is content-addressed so identical inputs reproduce exactly.
         dataset_id = uuid5(NAMESPACE_URL, f"{workspace_id}:{dataset_name}:{normalized_hash}")
         dataset = DatasetRecord(
             dataset_id=dataset_id, workspace_id=workspace_id, name=dataset_name, version=1,
@@ -114,19 +111,15 @@ class ResearchVerticalSlice:
             metadata={**(metadata or {}), "extractor": extractor_version},
         )
 
-        # Chunk -> Embed.
         chunks = tuple(self._chunks(dataset.dataset_id, normalized))
         if not chunks:
             raise ResearchPlatformError("document produced no research chunks")
-
-        # Hybrid search -> reciprocal-rank fusion -> deterministic rerank.
         query_vector = self.embedding_provider.embed(query)
         candidates = tuple(self._hybrid_candidates(query, chunks, query_vector, title, source_uri))[:candidate_limit]
         ranked = tuple(rerank(query, list(candidates), limit))
         if not ranked:
             raise ResearchPlatformError("research query produced no evidence")
 
-        # Evidence -> Citation validation.
         citations: list[dict[str, Any]] = []
         evidence: dict[str, str] = {}
         for hit in ranked:
