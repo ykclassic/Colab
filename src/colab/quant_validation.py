@@ -17,7 +17,6 @@ SignalFn = Callable[[Sequence[float]], Sequence[int]]
 
 @dataclass(frozen=True)
 class BacktestResult:
-    """Immutable backtest result suitable for persistence and audit."""
     initial_capital: float
     final_equity: float
     total_return: float
@@ -29,7 +28,6 @@ class BacktestResult:
 
 @dataclass(frozen=True)
 class WalkForwardWindow:
-    """One chronological train/test window."""
     train_start: int
     train_end: int
     test_start: int
@@ -45,7 +43,6 @@ def _validate_prices(prices: Sequence[float]) -> None:
 
 
 def run_backtest(prices: Sequence[float], signals: Sequence[int], *, initial_capital: float = 100_000.0, transaction_cost_bps: float = 0.0) -> BacktestResult:
-    """Run a long/flat, close-to-close backtest without look-ahead execution."""
     _validate_prices(prices)
     if len(signals) != len(prices):
         raise ValueError("signals and prices must have equal length")
@@ -79,7 +76,6 @@ def run_backtest(prices: Sequence[float], signals: Sequence[int], *, initial_cap
 
 
 def walk_forward_validate(prices: Sequence[float], signal_fn: SignalFn, *, train_size: int, test_size: int, step: int | None = None, initial_capital: float = 100_000.0, transaction_cost_bps: float = 0.0) -> tuple[WalkForwardWindow, ...]:
-    """Evaluate chronological out-of-sample windows without shuffling or leakage."""
     _validate_prices(prices)
     if train_size < 1 or test_size < 1:
         raise ValueError("train_size and test_size must be positive")
@@ -155,7 +151,7 @@ class QuantScientificValidator:
         findings.append(self._check("stale_data_policy", bool(meta.get("stale_data_policy")), "Record how stale observations are detected and handled."))
         findings.append(self._check("feature_timestamp_alignment", all(row.timestamp == bar.timestamp for row, bar in zip(features.rows, dataset.bars, strict=True)), "Feature timestamps must exactly align to source bars."))
         canonical = "|".join(f"{x.check}:{x.passed}:{x.severity}:{x.message}" for x in findings)
-        return ScientificValidation(passed=all(x.passed for x in findings), findings=tuple(findings), validation_hash=sha256(canonical.encode()).hexdigest())
+        return ScientificValidation(passed=all(x.passed for x in findings), findings=tuple(findings), validation_hash=hashlib.sha256(canonical.encode()).hexdigest())
 
     @staticmethod
     def _check(check: str, passed: bool, message: str) -> ValidationFinding:
