@@ -1,4 +1,4 @@
-# ruff: noqa: E701,E702
+# ruff: noqa: I001,E701,E702
 """Adapters that expose the existing service contracts over PostgreSQL."""
 from __future__ import annotations
 
