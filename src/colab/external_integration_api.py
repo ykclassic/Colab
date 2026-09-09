@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .external_integration import ExternalIntegrationError, ExternalIntegrationRegistry
@@ -18,21 +18,26 @@ class ExternalFetchRequest(BaseModel):
     workspace_id: UUID | None = None
 
 
+def _integration_principal(request: Request) -> Principal:
+    return authorize_endpoint(request, Permission.INTEGRATION_READ)
+
+
 def register_external_integration_routes(app: Any, registry: ExternalIntegrationRegistry) -> None:
     router = APIRouter(prefix="/api/integrations", tags=["external-integrations"])
 
     @router.get("")
-    def list_integrations(principal: Principal = Depends(lambda request: authorize_endpoint(request, Permission.INTEGRATION_READ))) -> list[dict[str, object]]:
+    def list_integrations(principal: Principal = Depends(_integration_principal)) -> list[dict[str, object]]:
         del principal
-        records: list[dict[str, object]] = []
-        for item in registry.list_connectors():
-            records.append({"name": item.name, "base_url": item.base_url, "allowed_paths": list(item.allowed_paths), "description": item.description, "read_only": True})
-        return records
+        return [
+            {"name": item.name, "base_url": item.base_url, "allowed_paths": list(item.allowed_paths), "description": item.description, "read_only": True}
+            for item in registry.list_connectors()
+        ]
 
     @router.post("/{connector}/fetch")
-    def fetch_integration(connector: str, payload: ExternalFetchRequest, principal: Principal = Depends(lambda request: authorize_endpoint(request, Permission.INTEGRATION_READ))) -> dict[str, object]:
+    def fetch_integration(connector: str, payload: ExternalFetchRequest, request: Request, principal: Principal = Depends(_integration_principal)) -> dict[str, object]:
+        del principal
         if payload.workspace_id is not None:
-            require_workspace_membership(RequestProxy(principal, app), payload.workspace_id, Permission.WORKSPACE_READ)
+            require_workspace_membership(request, payload.workspace_id, Permission.WORKSPACE_READ)
         try:
             request_id, data = registry.fetch_json(connector, payload.path, payload.query)
         except ExternalIntegrationError as exc:
@@ -40,7 +45,7 @@ def register_external_integration_routes(app: Any, registry: ExternalIntegration
         return {"request_id": str(request_id), "connector": connector, "read_only": True, "data": data}
 
     @router.get("/{connector}/audit")
-    def integration_audit(connector: str, limit: int = Query(default=100, ge=1, le=1000), principal: Principal = Depends(lambda request: authorize_endpoint(request, Permission.INTEGRATION_READ))) -> list[dict[str, object]]:
+    def integration_audit(connector: str, limit: int = Query(default=100, ge=1, le=1000), principal: Principal = Depends(_integration_principal)) -> list[dict[str, object]]:
         del principal
         try:
             registry.get(connector)
@@ -53,11 +58,3 @@ def register_external_integration_routes(app: Any, registry: ExternalIntegration
         return records[-limit:]
 
     app.include_router(router)
-
-
-class RequestProxy:
-    """Minimal request facade used only to reuse the workspace authorization helper."""
-
-    def __init__(self, principal: Principal, app: Any) -> None:
-        self.state = type("State", (), {"principal": principal})()
-        self.app = app
