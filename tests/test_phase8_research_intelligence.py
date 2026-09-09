@@ -1,10 +1,9 @@
-# ruff: noqa: I001,E701,E702
+# ruff: noqa: I001
 from __future__ import annotations
 
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-
 from colab.api import app
 from colab.research_intelligence import DeterministicEmbeddingProvider, DocumentIngestionError, ResearchIntelligence
 
