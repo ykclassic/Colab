@@ -1,3 +1,4 @@
+# ruff: noqa: E701,E702
 """Adapters that expose the existing service contracts over PostgreSQL."""
 from __future__ import annotations
 
@@ -9,13 +10,7 @@ from psycopg import Connection, connect
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import (
-    ArtifactRecord,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    Workspace,
-)
+from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
 from .workspace_lifecycle import WorkspaceLifecycleStore
 
 
@@ -26,8 +21,7 @@ def production_connection_factory_from_dsn(dsn: str) -> Callable[[], Connection[
 
 
 class PostgresWorkspaceManager:
-    def __init__(self, store: PostgresPlatformStore, lifecycle_store: WorkspaceLifecycleStore | None = None) -> None:
-        self._store = lifecycle_store or WorkspaceLifecycleStore(store._connection_factory, store.max_concurrent)
+    def __init__(self, store: PostgresPlatformStore, lifecycle_store: WorkspaceLifecycleStore | None = None) -> None: self._store = lifecycle_store or WorkspaceLifecycleStore(store._connection_factory, store.max_concurrent)
     def submit(self, workspace: Workspace, idempotency_key: str | None = None) -> Workspace: return self._store.submit(workspace, idempotency_key)
     def get(self, workspace_id: UUID) -> Workspace: return self._store.get(workspace_id)
     def list(self, include_archived: bool = False) -> list[Workspace]: return list(self._store.list(include_archived))
