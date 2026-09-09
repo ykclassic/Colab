@@ -1,9 +1,10 @@
 """Phase 21E quantitative research vertical-slice orchestration."""
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from hashlib import sha256
-from typing import Any, Callable, Mapping, Sequence
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import uuid4
 
 from .quant_lab import (
     BacktestResult,
@@ -14,19 +15,7 @@ from .quant_lab import (
     SignalFunction,
     WalkForwardResult,
 )
-from .quant_platform import (
-    ExperimentRecord,
-    MonteCarloResult,
-    RobustnessResult,
-    RiskMetrics,
-    StrategyRecord,
-    StressScenario,
-    experiment_hash,
-    monte_carlo,
-    portfolio_risk,
-    robustness_analysis,
-    stress_test,
-)
+from .quant_platform import ExperimentRecord, StrategyRecord, experiment_hash, monte_carlo, portfolio_risk, robustness_analysis, stress_test
 from .quant_validation import QuantScientificValidator, ScientificValidation
 
 
@@ -56,19 +45,16 @@ class QuantVerticalSlice:
         commission_bps: float = 1.0,
         slippage_bps: float = 1.0,
     ) -> dict[str, Any]:
-        if strategy.workspace_id is None:
-            raise QuantVerticalSliceError("strategy must be workspace-bound")
         if strategy.dataset_ids and dataset.dataset_id not in strategy.dataset_ids:
             raise QuantVerticalSliceError("strategy is not bound to the supplied dataset")
-        if dataset.symbol != dataset.bars[0].symbol:
-            raise QuantVerticalSliceError("dataset symbol mismatch")
+        if train_size + test_size > len(dataset.bars):
+            raise QuantVerticalSliceError("train_size + test_size exceeds dataset length")
 
         features = FeatureEngineer().build(dataset, sorted({int(x) for values in parameter_grid.values() for x in values if isinstance(x, int) and x >= 2}) or (5, 20))
         validation = self.validator.validate(
-            dataset,
-            features,
-            train_end=dataset.bars[train_size - 1].timestamp if train_size < len(dataset.bars) else None,
-            test_start=dataset.bars[train_size].timestamp if train_size < len(dataset.bars) else None,
+            dataset, features,
+            train_end=dataset.bars[train_size - 1].timestamp,
+            test_start=dataset.bars[train_size].timestamp,
             metadata=validation_metadata,
             commission_bps=commission_bps,
             slippage_bps=slippage_bps,
@@ -76,17 +62,9 @@ class QuantVerticalSlice:
         if not validation.passed:
             raise QuantVerticalSliceError("scientific validation failed: " + ", ".join(x.check for x in validation.failures))
 
-        sweep_id = uuid4()
-        sweep = ParameterSweeper().run(sweep_id, dataset, features, signal, parameter_grid)
+        sweep = ParameterSweeper().run(uuid4(), dataset, features, signal, parameter_grid)
         backtest = sweep.results[sweep.best_index or 0]
-        walk_forward = self.lab.walk_forward(
-            dataset,
-            features,
-            signal,
-            parameter_grid,
-            train_size=train_size,
-            test_size=test_size,
-        )
+        walk_forward = self.lab.walk_forward(dataset, features, signal, parameter_grid, train_size=train_size, test_size=test_size)
         returns = self._returns(backtest)
         risk = portfolio_risk(returns)
         stress = stress_test(returns, scenarios or {"market_shock": {"market": -0.10}})
@@ -104,19 +82,10 @@ class QuantVerticalSlice:
         digest = experiment_hash(experiment)
         reproducibility = self._reproducibility(dataset, strategy, experiment, validation, backtest, walk_forward, digest)
         return {
-            "workspace_id": strategy.workspace_id,
-            "dataset": dataset,
-            "strategy": strategy,
-            "experiment": experiment,
-            "experiment_hash": digest,
-            "scientific_validation": validation,
-            "backtest": backtest,
-            "walk_forward_oos": walk_forward,
-            "risk": risk,
-            "stress": tuple(stress),
-            "monte_carlo": mc,
-            "robustness": robust,
-            "reproducibility_hash": reproducibility,
+            "workspace_id": strategy.workspace_id, "dataset": dataset, "strategy": strategy, "experiment": experiment,
+            "experiment_hash": digest, "scientific_validation": validation, "backtest": backtest,
+            "walk_forward_oos": walk_forward, "risk": risk, "stress": tuple(stress), "monte_carlo": mc,
+            "robustness": robust, "reproducibility_hash": reproducibility,
         }
 
     @staticmethod

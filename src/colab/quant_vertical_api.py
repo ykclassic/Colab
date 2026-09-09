@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isnan
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -65,7 +66,7 @@ def register_quant_vertical_routes(app: Any) -> None:
             values = context.features.rows[context.index].values
             fast = values.get(f"sma_{context.parameters['fast']}")
             slow = values.get(f"sma_{context.parameters['slow']}")
-            if fast is None or slow is None or fast != fast or slow != slow:
+            if fast is None or slow is None or isnan(fast) or isnan(slow):
                 return 0.0
             return 1.0 if fast > slow else 0.0
 

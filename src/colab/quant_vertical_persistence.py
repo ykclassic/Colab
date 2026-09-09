@@ -8,8 +8,6 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
-from .quant_vertical_slice import QuantVerticalSlice
-
 
 class PostgresQuantVerticalSliceStore:
     def __init__(self, connection_factory: Callable[[], Connection[Any]]) -> None:
@@ -24,7 +22,7 @@ class PostgresQuantVerticalSliceStore:
                 """INSERT INTO public.quant_research_runs
                 (run_id,workspace_id,dataset_id,strategy_id,experiment_id,experiment_hash,validation_hash,reproducibility_hash,backtest,walk_forward_oos,risk,stress,monte_carlo,robustness,created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())""",
-                (UUID(str(result["experiment"].experiment_id)), experiment.workspace_id, result["dataset"].dataset_id,
+                (UUID(str(experiment.experiment_id)), experiment.workspace_id, result["dataset"].dataset_id,
                  experiment.strategy_id, experiment.experiment_id, result["experiment_hash"], validation.validation_hash,
                  digest, Jsonb(result["backtest"].model_dump(mode="json")), Jsonb(result["walk_forward_oos"].model_dump(mode="json")),
                  Jsonb(result["risk"].model_dump(mode="json")), Jsonb([x.model_dump(mode="json") for x in result["stress"]]),
