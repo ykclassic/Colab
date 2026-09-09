@@ -1,7 +1,7 @@
 -- Phase 19 Agent Platform
 create table if not exists public.agents (
   agent_id uuid primary key,
-  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  workspace_id uuid not null references public.product_workspaces(workspace_id) on delete cascade,
   name text not null,
   version integer not null check (version > 0),
   role text not null,
@@ -19,7 +19,7 @@ create table if not exists public.agent_evaluations (
   result_id uuid primary key,
   case_id uuid not null,
   agent_id uuid not null references public.agents(agent_id) on delete cascade,
-  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  workspace_id uuid not null references public.product_workspaces(workspace_id) on delete cascade,
   score double precision not null check (score between 0 and 1),
   correctness double precision not null check (correctness between 0 and 1),
   evidence_quality double precision not null check (evidence_quality between 0 and 1),
@@ -35,7 +35,7 @@ create index if not exists agent_evaluations_workspace_agent_idx on public.agent
 
 create table if not exists public.agent_memory (
   memory_id uuid primary key,
-  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  workspace_id uuid not null references public.product_workspaces(workspace_id) on delete cascade,
   agent_id uuid references public.agents(agent_id) on delete cascade,
   key text not null,
   value text not null,
@@ -48,7 +48,7 @@ create index if not exists agent_memory_workspace_idx on public.agent_memory(wor
 
 create table if not exists public.agent_costs (
   record_id uuid primary key,
-  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  workspace_id uuid not null references public.product_workspaces(workspace_id) on delete cascade,
   agent_id uuid not null references public.agents(agent_id) on delete cascade,
   model text not null,
   tokens_in bigint not null check (tokens_in >= 0),
