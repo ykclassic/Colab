@@ -48,7 +48,7 @@ class PostgresKnowledgeBase:
         result.workspace_id = workspace_id; return result
     def search(self, query: str, limit: int = 10, workspace_id: UUID | None = None) -> list[KnowledgeDocument]:
         documents = self._store.search_knowledge(query, limit)
-        if workspace_id is None: return []
+        if workspace_id is None: return documents
         return [document for document in documents if document.workspace_id == workspace_id]
 
 
