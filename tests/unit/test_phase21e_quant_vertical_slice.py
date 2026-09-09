@@ -13,7 +13,7 @@ from colab.quant_vertical_slice import QuantVerticalSlice, QuantVerticalSliceErr
 
 def dataset(size: int = 90) -> MarketDataset:
     start = datetime(2025, 1, 1, tzinfo=UTC)
-    bars = tuple(MarketBar(timestamp=start + timedelta(days=i), symbol="TEST", open=100 + i * 0.1, high=101 + i * 0.1, low=99 + i * 0.1, close=100 + i * 0.15, volume=1000 + i) for i in range(size))
+    bars = tuple(MarketBar(timestamp=start + timedelta(days=i), symbol="TEST", open=100 + i * 0.1, high=101 + i * 0.2, low=99 + i * 0.05, close=100 + i * 0.15, volume=1000 + i) for i in range(size))
     return MarketDataset(symbol="TEST", bars=bars, source="synthetic")
 
 
