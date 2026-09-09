@@ -9,7 +9,7 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.rows import dict_row
 
-from .contracts import AgentTask, Artifact, AuditEvent, RiskAssessment, WorkflowState
+from .contracts import AgentTask, Artifact, AuditEvent, RiskAssessment, Stage, WorkflowState
 from .policy import validate_state_for_persistence
 from .workflow_integrity import (
     WorkflowIntegrityError,
@@ -64,7 +64,7 @@ class PostgresWorkflowRepository:
             self._write_checkpoint(cur, state, 1, payload, digest)
             self._append_event(
                 cur, state, 1, None, state.current_stage.value, state.current_stage.value,
-                digest, "workflow_created", "system", "Workflow created at intake stage.",
+                digest, 1, "workflow_created", "system", "Workflow created at intake stage.",
             )
         return 1
 
@@ -93,8 +93,8 @@ class PostgresWorkflowRepository:
                 raise ConcurrentWorkflowUpdate(
                     f"workflow {state.workflow_id} changed since version {expected_version}"
                 )
-            source_stage = previous["current_stage"]
-            validate_stage_transition(__import__("colab.contracts", fromlist=["Stage"]).Stage(source_stage), state.current_stage, state)
+            source_stage = Stage(previous["current_stage"])
+            validate_stage_transition(source_stage, state.current_stage, state)
             cur.execute(
                 """UPDATE public.workflows
                    SET workspace_id=%s,schema_version=%s,product_goal=%s,product_brief=%s,roadmap=%s,
@@ -121,10 +121,10 @@ class PostgresWorkflowRepository:
             last_event = cur.fetchone()
             sequence = int(last_event["sequence_no"]) + 1 if last_event else 1
             previous_hash = last_event["resulting_state_hash"] if last_event else None
-            event_type = "stage_advanced" if source_stage != state.current_stage.value else "workflow_snapshot_saved"
+            event_type = "stage_advanced" if source_stage != state.current_stage else "workflow_snapshot_saved"
             self._append_event(
-                cur, state, sequence, previous_hash, source_stage, state.current_stage.value,
-                digest, event_type, "orchestrator", f"{source_stage} -> {state.current_stage.value}",
+                cur, state, sequence, previous_hash, source_stage.value, state.current_stage.value,
+                digest, new_version, event_type, "orchestrator", f"{source_stage.value} -> {state.current_stage.value}",
             )
         return new_version
 
@@ -164,9 +164,7 @@ class PostgresWorkflowRepository:
                     )
 
     @staticmethod
-    def _write_checkpoint(
-        cur: Any, state: WorkflowState, version: int, payload: dict[str, Any], digest: str
-    ) -> None:
+    def _write_checkpoint(cur: Any, state: WorkflowState, version: int, payload: dict[str, Any], digest: str) -> None:
         cur.execute(
             """INSERT INTO public.workflow_checkpoints (workflow_id,version,state,state_hash)
                VALUES (%s,%s,%s,%s)""",
@@ -175,16 +173,9 @@ class PostgresWorkflowRepository:
 
     @staticmethod
     def _append_event(
-        cur: Any,
-        state: WorkflowState,
-        sequence: int,
-        previous_hash: str | None,
-        from_stage: str,
-        to_stage: str,
-        resulting_hash: str,
-        event_type: str,
-        actor: str,
-        message: str,
+        cur: Any, state: WorkflowState, sequence: int, previous_hash: str | None,
+        from_stage: str, to_stage: str, resulting_hash: str, snapshot_version: int,
+        event_type: str, actor: str, message: str,
     ) -> None:
         cur.execute(
             """INSERT INTO public.workflow_events
@@ -192,7 +183,7 @@ class PostgresWorkflowRepository:
              resulting_state_hash,snapshot_version,actor,message)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (state.workflow_id, sequence, event_type, from_stage, to_stage, previous_hash,
-             resulting_hash, sequence if sequence == 1 else None, actor, message),
+             resulting_hash, snapshot_version, actor, message),
         )
 
     @staticmethod
@@ -226,11 +217,9 @@ class PostgresWorkflowRepository:
                  assessment.findings, assessment.controls, assessment.assessor.value),
             )
         for decision in state.decisions[decision_offset:]:
-            cur.execute("INSERT INTO public.workflow_decisions (workflow_id,decision) VALUES (%s,%s)",
-                        (state.workflow_id, decision))
+            cur.execute("INSERT INTO public.workflow_decisions (workflow_id,decision) VALUES (%s,%s)", (state.workflow_id, decision))
         for approval in state.approvals[approval_offset:]:
-            cur.execute("INSERT INTO public.workflow_approvals (workflow_id,approval) VALUES (%s,%s)",
-                        (state.workflow_id, approval))
+            cur.execute("INSERT INTO public.workflow_approvals (workflow_id,approval) VALUES (%s,%s)", (state.workflow_id, approval))
         for event in state.audit_events:
             actor = event.actor.value if hasattr(event.actor, "value") else event.actor
             cur.execute(
@@ -238,8 +227,7 @@ class PostgresWorkflowRepository:
                 (event_id,workflow_id,event_type,stage,actor,message,at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (event_id) DO NOTHING""",
-                (event.event_id, state.workflow_id, event.event_type, event.stage.value,
-                 actor, event.message, event.at),
+                (event.event_id, state.workflow_id, event.event_type, event.stage.value, actor, event.message, event.at),
             )
 
     @staticmethod
@@ -258,11 +246,9 @@ class PostgresWorkflowRepository:
         cur.execute("SELECT event_id,event_type,stage,actor,message,at FROM public.audit_events WHERE workflow_id=%s ORDER BY at", (workflow_id,))
         events = [AuditEvent.model_validate(row) for row in cur.fetchall()]
         return WorkflowState(
-            workflow_id=workflow_id,
-            workspace_id=workflow.get("workspace_id"),
-            schema_version=workflow["schema_version"], product_goal=workflow["product_goal"],
-            product_brief=workflow["product_brief"], roadmap=workflow["roadmap"], current_stage=workflow["current_stage"],
-            agent_tasks=tasks,
+            workflow_id=workflow_id, workspace_id=workflow.get("workspace_id"), schema_version=workflow["schema_version"],
+            product_goal=workflow["product_goal"], product_brief=workflow["product_brief"], roadmap=workflow["roadmap"],
+            current_stage=workflow["current_stage"], agent_tasks=tasks,
             research_artifacts=[Artifact.model_validate({k: v for k, v in row.items() if k != "collection"}) for row in artifacts if row["collection"] == "research"],
             strategy_candidates=[Artifact.model_validate({k: v for k, v in row.items() if k != "collection"}) for row in artifacts if row["collection"] == "strategy"],
             implementation_artifacts=[Artifact.model_validate({k: v for k, v in row.items() if k != "collection"}) for row in artifacts if row["collection"] == "implementation"],
