@@ -1,7 +1,8 @@
 """PostgreSQL persistence for Phase 19 agent records, evaluations, memory and costs."""
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from uuid import UUID
 
 from .agent_platform import AgentRecord, CostRecord, EvaluationResult, MemoryRecord
@@ -27,7 +28,7 @@ class PostgresAgentPlatformStore:
             return
         with self._connection_factory() as conn, conn.cursor() as cur:
             for r in results:
-                cur.execute("INSERT INTO public.agent_evaluations (result_id,case_id,agent_id,workspace_id,score,correctness,evidence_quality,latency_ms,tokens_in,tokens_out,cost_usd,passed,rationale,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (r.result_id,r.case_id,r.agent_id,_workspace_for_result(r),r.score,r.correctness,r.evidence_quality,r.latency_ms,r.tokens_in,r.tokens_out,r.cost_usd,r.passed,r.rationale,r.created_at))
+                cur.execute("INSERT INTO public.agent_evaluations (result_id,case_id,agent_id,workspace_id,score,correctness,evidence_quality,latency_ms,tokens_in,tokens_out,cost_usd,passed,rationale,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (r.result_id,r.case_id,r.agent_id,r.workspace_id,r.score,r.correctness,r.evidence_quality,r.latency_ms,r.tokens_in,r.tokens_out,r.cost_usd,r.passed,r.rationale,r.created_at))
 
     def save_memory(self, memory: MemoryRecord) -> MemoryRecord:
         with self._connection_factory() as conn, conn.cursor() as cur:
@@ -47,11 +48,3 @@ class PostgresAgentPlatformStore:
         with self._connection_factory() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO public.agent_costs (record_id,workspace_id,agent_id,model,tokens_in,tokens_out,cost_usd,latency_ms,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)", (record.record_id,record.workspace_id,record.agent_id,record.model,record.tokens_in,record.tokens_out,record.cost_usd,record.latency_ms,record.created_at))
         return record
-
-
-def _workspace_for_result(result: EvaluationResult) -> UUID:
-    """EvaluationResult intentionally remains portable; persistence API requires workspace binding."""
-    workspace = getattr(result, "workspace_id", None)
-    if workspace is None:
-        raise ValueError("evaluation result must carry workspace_id for durable persistence")
-    return workspace
