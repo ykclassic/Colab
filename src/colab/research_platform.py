@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import urllib.error
@@ -41,7 +40,7 @@ class OpenAIEmbeddingProvider:
             raise ResearchPlatformError("OPENAI_API_KEY is required for the real embedding provider")
 
     def embed(self, text: str) -> list[float]:
-        payload = json.dumps({"model": self.model, "input": text}).encode("utf-8")
+        payload = json.dumps({"model": self.model, "input": text, "dimensions": self.dimensions}).encode("utf-8")
         request = urllib.request.Request(
             os.getenv("COLAB_EMBEDDING_URL", "https://api.openai.com/v1/embeddings"),
             data=payload,
@@ -226,8 +225,8 @@ def rerank(query: str, candidates: list[RetrievalCandidate], limit: int) -> list
     return [item for _, item in scored[:limit]]
 
 
-def build_report(*, workspace_id: UUID, query: str, answer: str, citations: list[dict[str, Any]], dataset_ids: list[UUID], retrieval_config: dict[str, Any], provider: dict[str, Any]) -> ResearchReport:
-    validations = validate_citations(citations, {str(c["citation_id"]): str(c.get("source_text", "")) for c in citations})
+def build_report(*, workspace_id: UUID, query: str, answer: str, citations: list[dict[str, Any]], evidence: dict[str, str], dataset_ids: list[UUID], retrieval_config: dict[str, Any], provider: dict[str, Any]) -> ResearchReport:
+    validations = validate_citations(citations, evidence)
     invalid = [x for x in validations if not x.valid]
     if invalid:
         raise ResearchPlatformError("citation validation failed")
