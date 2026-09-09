@@ -1,0 +1,9 @@
+'use client';
+
+import { useState } from 'react';
+
+export default function StrategyLabPage() {
+  const [fast, setFast] = useState(5); const [slow, setSlow] = useState(20); const [result, setResult] = useState<any>(null); const [busy, setBusy] = useState(false);
+  async function run() { setBusy(true); try { const bars = Array.from({length:60},(_,i)=>{const c=100+i*.25+(i%9===0?2:0);return {timestamp:new Date(Date.UTC(2025,0,1+i)).toISOString(),symbol:'RESEARCH',open:c-.1,high:c+.5,low:c-.5,close:c,volume:1000+i*10};}); const r=await fetch('/api/quant/backtest',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({symbol:'RESEARCH',bars,fast_window:fast,slow_window:slow})}); setResult(await r.json());} finally {setBusy(false);} }
+  return <main><div className="page-head"><div><p className="eyebrow">STRATEGY RESEARCH</p><h1>Quantitative Strategy Lab</h1><p>Parameterized strategy experiments isolated from live execution.</p></div></div><section className="card"><div className="grid grid-2"><label>Fast window<input type="number" value={fast} min={2} onChange={e=>setFast(Number(e.target.value))}/></label><label>Slow window<input type="number" value={slow} min={3} onChange={e=>setSlow(Number(e.target.value))}/></label></div><div className="actions"><button className="button" disabled={busy||fast>=slow} onClick={run}>{busy?'Running…':'Run experiment'}</button></div></section>{result?.result?.metrics&&<section className="section"><div className="card"><h2>Experiment metrics</h2><div className="grid grid-4">{Object.entries(result.result.metrics).map(([k,v]:any)=><div className="panel" key={k}><span className="label">{k.replaceAll('_',' ')}</span><div className="metric">{typeof v==='number'?v.toFixed(4):String(v)}</div></div>)}</div></div></section>}</main>;
+}
