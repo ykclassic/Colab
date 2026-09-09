@@ -9,13 +9,7 @@ from psycopg import Connection, connect
 
 from .operations import ExecutionJob, MetricsSnapshot, OperationalEvent
 from .production_persistence import PostgresPlatformStore
-from .productization import (
-    ArtifactRecord,
-    KnowledgeDocument,
-    StrategySpec,
-    ToolDefinition,
-    Workspace,
-)
+from .productization import ArtifactRecord, KnowledgeDocument, StrategySpec, ToolDefinition, Workspace
 from .workspace_lifecycle import WorkspaceLifecycleStore
 
 
@@ -71,17 +65,19 @@ class PostgresKnowledgeBase:
         self._store = store
 
     def upsert(self, document: KnowledgeDocument) -> KnowledgeDocument:
-        # The legacy store method predates workspace ownership. Bind the row to the
-        # requested tenant in the same adapter boundary and reject cross-tenant moves.
-        with self._store._connection() as conn, conn.transaction(), conn.cursor() as cur:
+        workspace_id = document.workspace_id
+        connection = getattr(self._store, "_connection", None)
+        if workspace_id is None or connection is None:
+            return self._store.upsert_knowledge(document)
+        with connection() as conn, conn.transaction(), conn.cursor() as cur:
             cur.execute("SELECT workspace_id FROM public.knowledge_documents WHERE document_id=%s", (document.document_id,))
             existing = cur.fetchone()
-            if existing is not None and existing[0] not in (None, document.workspace_id):
+            if existing is not None and existing[0] not in (None, workspace_id):
                 raise PermissionError("knowledge document belongs to another workspace")
         result = self._store.upsert_knowledge(document)
-        with self._store._connection() as conn, conn.transaction(), conn.cursor() as cur:
-            cur.execute("UPDATE public.knowledge_documents SET workspace_id=%s WHERE document_id=%s", (document.workspace_id, document.document_id))
-        result.workspace_id = document.workspace_id
+        with connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("UPDATE public.knowledge_documents SET workspace_id=%s WHERE document_id=%s", (workspace_id, document.document_id))
+        result.workspace_id = workspace_id
         return result
 
     def search(self, query: str, limit: int = 10, workspace_id: UUID | None = None) -> list[KnowledgeDocument]:
