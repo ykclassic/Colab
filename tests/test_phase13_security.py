@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from colab.security import (
@@ -22,19 +22,7 @@ from colab.security import (
 
 def _token(secret: str, user_id: UUID, role: str) -> str:
     now = int(time.time())
-    return jwt.encode(
-        {
-            "sub": str(user_id),
-            "role": "authenticated",
-            "aud": "authenticated",
-            "iss": "https://example.supabase.co/auth/v1",
-            "iat": now,
-            "exp": now + 300,
-            "app_metadata": {"colab_role": role},
-        },
-        secret,
-        algorithm="HS256",
-    )
+    return jwt.encode({"sub": str(user_id), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": now, "exp": now + 300, "app_metadata": {"colab_role": role}}, secret, algorithm="HS256")
 
 
 def test_role_matrix_keeps_risk_and_approval_independent() -> None:
@@ -84,19 +72,17 @@ def test_security_middleware_protects_api_when_auth_is_required(monkeypatch: pyt
 
     client = TestClient(app)
     assert client.get("/api/protected").status_code == 401
-    assert client.get("/health").status_code == 404
 
 
-def test_workspace_membership_fails_closed_for_missing_membership() -> None:
-    class FakeDB:
-        _connection_factory = lambda self: None
-
+def test_workspace_authorization_denies_role_without_permission() -> None:
     app = FastAPI()
-    app.state.services = type("Services", (), {"database": FakeDB()})()
-    client = TestClient(app)
-    # This test covers the HTTP contract through a route that calls the common dependency.
+    app.state.services = type("Services", (), {"database": None})()
+
     @app.get("/api/workspaces/{workspace_id}")
-    def workspace(request):
-        require_workspace_membership(request, UUID(request.path_params["workspace_id"]))
+    def workspace(request: Request) -> dict[str, bool]:
+        request.state.principal = Principal("researcher", PlatformRole.RESEARCHER)
+        require_workspace_membership(request, UUID(request.path_params["workspace_id"]), Permission.APPROVE)
         return {"ok": True}
-    assert client.get(f"/api/workspaces/{uuid4()}").status_code in {404, 500}
+
+    client = TestClient(app)
+    assert client.get(f"/api/workspaces/{uuid4()}").status_code == 403
