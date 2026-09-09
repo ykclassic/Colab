@@ -46,6 +46,7 @@ class BarInput(BaseModel):
 
 class QuantRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
     symbol: str = Field(min_length=1, max_length=32)
     bars: list[BarInput] = Field(min_length=2)
     fast_window: int = Field(default=5, ge=2, le=250)
@@ -94,7 +95,7 @@ class MonteCarloRequest(ReturnsRequest):
 
 class RobustnessRequest(ReturnsRequest):
     perturbations: int = Field(default=100, ge=10, le=10_000)
-    seed: int = Field(default=42)
+    seed: int = 42
     min_sharpe: float = 0.0
 
 
@@ -130,6 +131,7 @@ def register_quant_routes(app: Any) -> None:
 
     @router.post("/backtest")
     def backtest(request: QuantRunRequest) -> dict[str, Any]:
+        authorize(request, request.workspace_id, Permission.RESEARCH_WRITE)
         if request.fast_window >= request.slow_window:
             raise HTTPException(status_code=422, detail="fast_window must be smaller than slow_window")
         dataset = _dataset(request)
@@ -138,10 +140,11 @@ def register_quant_routes(app: Any) -> None:
             result = lab.backtest(dataset, features, signal, {"fast_window": request.fast_window, "slow_window": request.slow_window}, initial_capital=request.initial_capital)
         except QuantLabError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"dataset_checksum": dataset.checksum, "features": list(features.feature_names), "result": result.model_dump(mode="json")}
+        return {"workspace_id": str(request.workspace_id), "dataset_checksum": dataset.checksum, "features": list(features.feature_names), "result": result.model_dump(mode="json")}
 
     @router.post("/walk-forward")
     def walk_forward(request: WalkForwardRequest) -> dict[str, Any]:
+        authorize(request, request.workspace_id, Permission.RESEARCH_WRITE)
         if request.fast_window >= request.slow_window:
             raise HTTPException(status_code=422, detail="fast_window must be smaller than slow_window")
         dataset = _dataset(request)
@@ -151,7 +154,7 @@ def register_quant_routes(app: Any) -> None:
             result = lab.walk_forward(dataset, features, signal, {"fast_window": request.fast_candidates, "slow_window": request.slow_candidates}, train_size=request.train_size, test_size=request.test_size)
         except QuantLabError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"dataset_checksum": dataset.checksum, "train_size": request.train_size, "test_size": request.test_size, "result": result.model_dump(mode="json")}
+        return {"workspace_id": str(request.workspace_id), "dataset_checksum": dataset.checksum, "train_size": request.train_size, "test_size": request.test_size, "result": result.model_dump(mode="json")}
 
     @router.post("/strategies", response_model=StrategyRecord, status_code=201)
     def register_strategy(payload: StrategyCreate, request: Request) -> StrategyRecord:
@@ -181,10 +184,11 @@ def register_quant_routes(app: Any) -> None:
 
     @router.get("/experiments")
     def experiments(request: Request, workspace_id: UUID | None = None) -> dict[str, Any]:
-        if workspace_id is not None:
-            authorize(request, workspace_id)
-            if durable_store:
-                return {"experiments": durable_store.list_experiments(workspace_id)}
+        if workspace_id is None:
+            raise HTTPException(status_code=422, detail="workspace_id is required")
+        authorize(request, workspace_id)
+        if durable_store:
+            return {"experiments": durable_store.list_experiments(workspace_id)}
         return {"experiments": [record.model_dump(mode="json") for record in lab.experiments()]}
 
     @router.post("/risk")
