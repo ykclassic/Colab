@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isnan
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantLabError, QuantitativeResearchLab
+from .quant_lab import (
+    FeatureEngineer,
+    MarketBar,
+    MarketDataset,
+    QuantLabError,
+    QuantitativeResearchLab,
+)
 
 
 class BarInput(BaseModel):
@@ -50,15 +57,24 @@ def register_quant_routes(app: Any) -> None:
             values = context.features.rows[context.index].values
             fast = values.get(f"sma_{context.parameters['fast_window']}")
             slow = values.get(f"sma_{context.parameters['slow_window']}")
-            if fast != fast or slow != slow:
+            if fast is None or slow is None or isnan(fast) or isnan(slow):
                 return 0.0
             return 1.0 if fast > slow else 0.0
 
         try:
-            result = lab.backtest(dataset, features, moving_average_signal, {"fast_window": request.fast_window, "slow_window": request.slow_window})
+            result = lab.backtest(
+                dataset,
+                features,
+                moving_average_signal,
+                {"fast_window": request.fast_window, "slow_window": request.slow_window},
+            )
         except QuantLabError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"dataset_checksum": dataset.checksum, "features": list(features.feature_names), "result": result.model_dump(mode="json")}
+        return {
+            "dataset_checksum": dataset.checksum,
+            "features": list(features.feature_names),
+            "result": result.model_dump(mode="json"),
+        }
 
     @router.get("/experiments")
     def experiments() -> dict[str, Any]:
