@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from typing import Self
 from uuid import UUID, uuid4
 
 from colab.durable_governance import DurableGovernance
@@ -23,26 +24,24 @@ class FakeCursor:
         if normalized.startswith("insert into public.governance_strategy_versions"):
             self.rowcount = 1
         elif "select * from public.governance_strategy_versions where version_id" in normalized:
-            self.row = self.state["version"]
+            self.row = self.state["version"]  # type: ignore[assignment]
         elif "select * from public.governance_strategy_versions order by" in normalized:
             self.rows = [self.state["version"]]  # type: ignore[list-item]
-        elif normalized.startswith("insert into public.governance_readiness_reports"):
-            self.rowcount = 1
-        elif normalized.startswith("insert into public.governance_gate_results"):
+        elif normalized.startswith("insert into public.governance_readiness_reports") or normalized.startswith("insert into public.governance_gate_results"):
             self.rowcount = 1
         elif normalized.startswith("insert into public.governance_promotion_decisions"):
             self.rowcount = 1
         elif "select * from public.governance_promotion_decisions order by" in normalized:
             self.rows = [self.state["decision"]]  # type: ignore[list-item]
         elif "select * from public.governance_approvals where approval_id" in normalized:
-            self.row = self.state["approval"]
+            self.row = self.state["approval"]  # type: ignore[assignment]
         elif "select 1 from public.governance_approval_invalidations" in normalized:
             self.row = None
         elif normalized.startswith("insert into public.governance_approvals"):
             self.rowcount = 1
             self.state["approval_inserted"] = True
         elif "select workspace_id from public.governance_approvals" in normalized:
-            approval = self.state["approval"]
+            approval = self.state["approval"]  # type: ignore[assignment]
             self.row = (approval["workspace_id"],)  # type: ignore[index]
         elif "select distinct on" in normalized and "governance_approvals" in normalized:
             self.rows = [self.state["approval"]]  # type: ignore[list-item]
@@ -53,7 +52,7 @@ class FakeCursor:
     def fetchall(self):
         return self.rows
 
-    def __enter__(self) -> FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -72,7 +71,7 @@ class FakeConnection:
         del kwargs
         return FakeCursor(self.state)
 
-    def __enter__(self) -> FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -114,7 +113,7 @@ def test_durable_governance_round_trip_contract() -> None:
     report = governance.readiness(version_id, (gate,))
     assert report.score == 100
     promoted = governance.promote(version_id, "candidate", "staging", (gate,))
-    assert promoted.approved is False  # staging requires additional gates
+    assert promoted.approved is False
     assert governance.decisions(workspace_id)[0].decision_id == decision_id
 
     principal = Principal(str(owner_id), PlatformRole.OWNER)
