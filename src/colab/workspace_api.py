@@ -20,6 +20,7 @@ from .security import (
     SecurityMiddleware,
     authorize_endpoint,
     current_principal,
+    require_workspace_membership,
 )
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -53,6 +54,7 @@ def _services(request: Request) -> Any:
 
 @router.patch("/{workspace_id}", response_model=Workspace)
 def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, request: Request) -> Workspace:
+    require_workspace_membership(request, workspace_id, Permission.WORKSPACE_WRITE)
     try:
         result = _services(request).workspaces.update(workspace_id, payload.version, name=payload.name, product_goal=payload.product_goal, priority=payload.priority, strategies=payload.strategies)
         return cast(Workspace, result)
@@ -64,6 +66,7 @@ def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, request: Requ
 
 @router.post("/{workspace_id}/archive", response_model=Workspace)
 def archive_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Request) -> Workspace:
+    require_workspace_membership(request, workspace_id, Permission.WORKSPACE_WRITE)
     try:
         result = _services(request).workspaces.archive(workspace_id, payload.version)
         return cast(Workspace, result)
@@ -75,6 +78,7 @@ def archive_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Re
 
 @router.post("/{workspace_id}/restore", response_model=Workspace)
 def restore_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Request) -> Workspace:
+    require_workspace_membership(request, workspace_id, Permission.WORKSPACE_WRITE)
     try:
         result = _services(request).workspaces.restore(workspace_id, payload.version)
         return cast(Workspace, result)
@@ -86,6 +90,7 @@ def restore_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Re
 
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_workspace(workspace_id: UUID, payload: WorkspaceVersion, request: Request) -> Response:
+    require_workspace_membership(request, workspace_id, Permission.WORKSPACE_WRITE)
     try:
         _services(request).workspaces.delete(workspace_id, payload.version)
     except KeyError as exc:

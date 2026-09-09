@@ -4,12 +4,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agents import DeterministicAgent
 from .collaboration import CollaborationEngine, MessageType, TaskSpec
 from .contracts import AgentRole, WorkflowState
+from .security import Permission, require_workspace_membership
 
 
 class CollaborationTaskCreate(BaseModel):
@@ -24,12 +25,14 @@ class CollaborationTaskCreate(BaseModel):
 
 class CollaborationRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
     product_goal: str = Field(min_length=1, max_length=10000)
     tasks: list[CollaborationTaskCreate] = Field(min_length=1, max_length=100)
 
 
 class CollaborationMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    workspace_id: UUID
     sender: AgentRole
     recipient: AgentRole
     task_id: UUID
@@ -42,7 +45,8 @@ def register_collaboration_routes(app: Any) -> None:
     router = APIRouter(prefix="/api/collaboration", tags=["collaboration"])
 
     @router.post("/run")
-    def run_collaboration(payload: CollaborationRunRequest) -> dict[str, Any]:
+    def run_collaboration(payload: CollaborationRunRequest, request: Request) -> dict[str, Any]:
+        require_workspace_membership(request, payload.workspace_id, Permission.WORKSPACE_WRITE)
         roles = {task.role for task in payload.tasks}
         agents = {role: DeterministicAgent(role) for role in roles}
         engine = CollaborationEngine(agents, max_workers=min(8, len(roles)))
@@ -58,10 +62,11 @@ def register_collaboration_routes(app: Any) -> None:
         }
 
     @router.post("/messages")
-    def send_message(payload: CollaborationMessageRequest) -> dict[str, Any]:
+    def send_message(payload: CollaborationMessageRequest, request: Request) -> dict[str, Any]:
+        require_workspace_membership(request, payload.workspace_id, Permission.WORKSPACE_WRITE)
         agents = {payload.sender: DeterministicAgent(payload.sender), payload.recipient: DeterministicAgent(payload.recipient)}
         engine = CollaborationEngine(agents)
-        message = engine.send(**payload.model_dump())
+        message = engine.send(**payload.model_dump(exclude={"workspace_id"}))
         return message.model_dump(mode="json")
 
     app.include_router(router)
