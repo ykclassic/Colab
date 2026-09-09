@@ -15,6 +15,7 @@ from colab.security import (
     RateLimiter,
     SecurityMiddleware,
     authenticate_bearer,
+    current_principal,
     require_permission,
     require_workspace_membership,
 )
@@ -52,12 +53,42 @@ def test_supabase_jwt_rejects_bad_audience(monkeypatch: pytest.MonkeyPatch) -> N
         authenticate_bearer(token)
 
 
-def test_rate_limiter_blocks_burst() -> None:
-    limiter = RateLimiter(2)
-    assert limiter.allow("user")
-    assert limiter.allow("user")
-    assert not limiter.allow("user")
-    assert limiter.allow("other")
+def test_security_principal_and_membership_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
+    app = FastAPI()
+    app.state.services = type("Services", (), {"database": None})()
+
+    @app.get("/api/test")
+    def test_route(request: Request) -> dict[str, str]:
+        principal = current_principal(request)
+        return {"user_id": principal.user_id, "role": principal.role.value}
+
+    client = TestClient(app)
+    response = client.get("/api/test", headers={"X-Test-User": "tester", "X-Test-Role": "reviewer"})
+    assert response.status_code == 200
+    assert response.json() == {"user_id": "tester", "role": "reviewer"}
+
+    app.state.services = type("Services", (), {"database": None})()
+    request = Request({"type": "http", "method": "GET", "path": "/api/test", "headers": [], "query_string": b"", "server": ("test", 80), "client": ("127.0.0.1", 1), "scheme": "http", "state": {}})
+    request.state.principal = Principal("researcher", PlatformRole.RESEARCHER)
+    with pytest.raises(Exception, match="insufficient permissions"):
+        require_workspace_membership(request, uuid4(), Permission.APPROVE)
+
+
+def test_security_middleware_rate_limit_and_headers() -> None:
+    app = FastAPI()
+    app.add_middleware(SecurityMiddleware, rate_limiter=RateLimiter(1))
+
+    @app.get("/api/open")
+    def open_route() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app)
+    first = client.get("/api/open")
+    second = client.get("/api/open")
+    assert first.status_code == 200
+    assert first.headers["x-content-type-options"] == "nosniff"
+    assert second.status_code == 429
 
 
 def test_security_middleware_protects_api_when_auth_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
