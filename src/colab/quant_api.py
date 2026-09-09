@@ -12,10 +12,23 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantitativeResearchLab, QuantLabError
+from .quant_lab import (
+    FeatureEngineer,
+    MarketBar,
+    MarketDataset,
+    QuantitativeResearchLab,
+    QuantLabError,
+)
 from .quant_persistence import PostgresQuantStore
 from .quant_platform import ExperimentRecord as DurableExperiment
-from .quant_platform import InMemoryStrategyRegistry, StrategyRecord, monte_carlo, portfolio_risk, robustness_analysis, stress_test
+from .quant_platform import (
+    InMemoryStrategyRegistry,
+    StrategyRecord,
+    monte_carlo,
+    portfolio_risk,
+    robustness_analysis,
+    stress_test,
+)
 from .security import Permission, require_workspace_membership
 from .service_adapters import production_connection_factory_from_dsn
 
@@ -76,7 +89,7 @@ class StressRequest(ReturnsRequest):
 class MonteCarloRequest(ReturnsRequest):
     simulations: int = Field(default=5000, ge=100, le=100_000)
     horizon: int = Field(default=252, ge=1, le=10_000)
-    seed: int = Field(default=42)
+    seed: int = 42
     drawdown_threshold: float = Field(default=0.20, gt=0, lt=1)
 
 
