@@ -81,6 +81,7 @@ def test_durable_governance_round_trip_contract() -> None:
     version_id = uuid4()
     owner_id = uuid4()
     decision_id = uuid4()
+    approval_id = uuid4()
     now = datetime.now(UTC)
     version = StrategyVersion(
         version_id=version_id, workspace_id=workspace_id, name="strategy", version="1.0.0",
@@ -93,7 +94,7 @@ def test_durable_governance_round_trip_contract() -> None:
         "readiness_score": 100.0, "gates": [gate.model_dump(mode="json")], "reasons": [], "decided_at": now,
     }
     approval_row = {
-        "approval_id": uuid4(), "workspace_id": workspace_id, "workflow_id": None,
+        "approval_id": approval_id, "workspace_id": workspace_id, "workflow_id": None,
         "artifact_id": None, "strategy_version_id": version_id, "artifact_digest": "a" * 64,
         "risk_assessment_id": None, "risk_assessment_digest": "r" * 64, "requested_by": owner_id,
         "decision": "pending", "decided_by": None, "rationale": None, "required_reviewers": 1,
@@ -122,6 +123,6 @@ def test_durable_governance_round_trip_contract() -> None:
     assert principal.can(Permission.APPROVE)
 
     reviewer = Principal(str(uuid4()), PlatformRole.REVIEWER)
-    decided = governance.decide_approval(UUID(approval_row["approval_id"]), reviewer, "approve", "reviewed")
+    decided = governance.decide_approval(approval_id, reviewer, "approve", "reviewed")
     assert decided.decision == "approve"
     assert governance.approvals(workspace_id)[0].decision == "approve"
