@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID
 
 import jwt
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from jwt import PyJWKClient
 
 
@@ -40,12 +40,22 @@ class Permission(StrEnum):
 
 ROLE_PERMISSIONS: dict[PlatformRole, frozenset[Permission]] = {
     PlatformRole.OWNER: frozenset(Permission),
-    PlatformRole.PROJECT_MANAGER: frozenset({Permission.WORKSPACE_READ, Permission.WORKSPACE_WRITE, Permission.AUDIT_READ, Permission.APPROVE, Permission.INTEGRATION_READ}),
+    PlatformRole.PROJECT_MANAGER: frozenset(
+        {
+            Permission.WORKSPACE_READ,
+            Permission.WORKSPACE_WRITE,
+            Permission.AUDIT_READ,
+            Permission.APPROVE,
+            Permission.INTEGRATION_READ,
+        }
+    ),
     PlatformRole.RESEARCHER: frozenset({Permission.WORKSPACE_READ, Permission.RESEARCH_WRITE}),
     PlatformRole.STRATEGY: frozenset({Permission.WORKSPACE_READ, Permission.STRATEGY_WRITE}),
     PlatformRole.RISK: frozenset({Permission.WORKSPACE_READ, Permission.RISK_ASSESS, Permission.AUDIT_READ}),
     PlatformRole.ENGINEER: frozenset({Permission.WORKSPACE_READ, Permission.IMPLEMENT, Permission.VALIDATE}),
-    PlatformRole.REVIEWER: frozenset({Permission.WORKSPACE_READ, Permission.APPROVE, Permission.AUDIT_READ, Permission.INTEGRATION_READ}),
+    PlatformRole.REVIEWER: frozenset(
+        {Permission.WORKSPACE_READ, Permission.APPROVE, Permission.AUDIT_READ, Permission.INTEGRATION_READ}
+    ),
 }
 
 
@@ -99,12 +109,26 @@ def authenticate_bearer(token: str) -> Principal:
         if secret:
             if algorithm not in {"HS256", "HS384", "HS512"}:
                 raise AuthenticationError("unsupported local JWT algorithm")
-            claims: dict[str, Any] = jwt.decode(token, secret, algorithms=[algorithm], audience=audience, issuer=issuer, options={"require": ["sub", "exp", "iat", "iss", "aud"]})
+            claims: dict[str, Any] = jwt.decode(
+                token,
+                secret,
+                algorithms=[algorithm],
+                audience=audience,
+                issuer=issuer,
+                options={"require": ["sub", "exp", "iat", "iss", "aud"]},
+            )
         else:
             if algorithm not in {"RS256", "ES256", "EdDSA"}:
                 raise AuthenticationError("unsupported Supabase JWT algorithm")
             key = _jwks_client(f"{issuer}/.well-known/jwks.json").get_signing_key_from_jwt(token).key
-            claims = jwt.decode(token, key, algorithms=[algorithm], audience=audience, issuer=issuer, options={"require": ["sub", "exp", "iat", "iss", "aud"]})
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=[algorithm],
+                audience=audience,
+                issuer=issuer,
+                options={"require": ["sub", "exp", "iat", "iss", "aud"]},
+            )
     except (jwt.PyJWTError, AuthenticationError, ValueError, OSError) as exc:
         raise AuthenticationError("invalid or expired access token") from exc
     subject = claims.get("sub")
@@ -118,7 +142,12 @@ def authenticate_bearer(token: str) -> Principal:
         role = PlatformRole(raw_role)
     except ValueError as exc:
         raise AuthenticationError("access token has no valid Colab role") from exc
-    return Principal(user_id=subject, role=role, session_id=str(claims["session_id"]) if claims.get("session_id") else None, email=str(claims["email"]) if claims.get("email") else None)
+    return Principal(
+        user_id=subject,
+        role=role,
+        session_id=str(claims["session_id"]) if claims.get("session_id") else None,
+        email=str(claims["email"]) if claims.get("email") else None,
+    )
 
 
 def require_permission(principal: Principal, permission: Permission) -> None:
@@ -165,12 +194,19 @@ def membership_role(connection_factory: Any, workspace_id: UUID, user_id: str) -
     except ValueError:
         return None
     with connection_factory() as conn, conn.cursor() as cur:
-        cur.execute("SELECT role FROM public.workspace_memberships WHERE workspace_id=%s AND user_id=%s", (workspace_id, user_uuid))
+        cur.execute(
+            "SELECT role FROM public.workspace_memberships WHERE workspace_id=%s AND user_id=%s",
+            (workspace_id, user_uuid),
+        )
         row = cur.fetchone()
     return None if row is None else str(row[0])
 
 
-def require_workspace_membership(request: Request, workspace_id: UUID, permission: Permission = Permission.WORKSPACE_READ) -> Principal:
+def require_workspace_membership(
+    request: Request,
+    workspace_id: UUID,
+    permission: Permission = Permission.WORKSPACE_READ,
+) -> Principal:
     principal = current_principal(request)
     services = getattr(request.app.state, "services", None)
     database = getattr(services, "database", None)
@@ -253,23 +289,47 @@ class SecurityMiddleware:
                 scope.setdefault("state", {})["principal"] = principal
                 workspace_id = extract_workspace_id(path)
                 if workspace_id is not None:
-                    permission = Permission.WORKSPACE_WRITE if scope.get("method", "GET").upper() in {"POST", "PUT", "PATCH", "DELETE"} else Permission.WORKSPACE_READ
+                    permission = (
+                        Permission.WORKSPACE_WRITE
+                        if scope.get("method", "GET").upper() in {"POST", "PUT", "PATCH", "DELETE"}
+                        else Permission.WORKSPACE_READ
+                    )
                     require_workspace_membership(request, workspace_id, permission)
             except HTTPException as exc:
                 headers = [(b"www-authenticate", b"Bearer")] if exc.status_code == 401 else []
-                await self._json(send, exc.status_code, ('{"detail":"%s"}' % str(exc.detail)).encode(), headers)
+                body = f'{{"detail":"{str(exc.detail)}"}}'.encode()
+                await self._json(send, exc.status_code, body, headers)
                 return
+
         async def secure_send(message: dict[str, Any]) -> None:
             if message.get("type") == "http.response.start":
                 headers = list(message.get("headers", []))
-                headers.extend([(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"), (b"referrer-policy", b"no-referrer"), (b"cache-control", b"no-store")])
+                headers.extend(
+                    [
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"x-frame-options", b"DENY"),
+                        (b"referrer-policy", b"no-referrer"),
+                        (b"cache-control", b"no-store"),
+                    ]
+                )
                 message["headers"] = headers
             await send(message)
+
         await self.app(scope, receive, secure_send)
 
     @staticmethod
     async def _json(send: Any, code: int, body: bytes, extra: list[tuple[bytes, bytes]]) -> None:
-        await send({"type": "http.response.start", "status": code, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()), *extra]})
+        await send(
+            {
+                "type": "http.response.start",
+                "status": code,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    *extra,
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": body})
 
 
@@ -292,9 +352,25 @@ class ApprovalService:
     def __init__(self) -> None:
         self._requests: dict[str, ApprovalRecord] = {}
 
-    def request(self, approval_id: str, workflow_id: str, artifact_id: str, artifact_version: int, risk_assessment_id: str, requested_by: Principal) -> ApprovalRecord:
+    def request(
+        self,
+        approval_id: str,
+        workflow_id: str,
+        artifact_id: str,
+        artifact_version: int,
+        risk_assessment_id: str,
+        requested_by: Principal,
+    ) -> ApprovalRecord:
         require_permission(requested_by, Permission.WORKSPACE_WRITE)
-        record = ApprovalRecord(approval_id, workflow_id, artifact_id, artifact_version, risk_assessment_id, requested_by.user_id, "pending")
+        record = ApprovalRecord(
+            approval_id,
+            workflow_id,
+            artifact_id,
+            artifact_version,
+            risk_assessment_id,
+            requested_by.user_id,
+            "pending",
+        )
         self._requests[approval_id] = record
         return record
 
@@ -312,7 +388,17 @@ class ApprovalService:
             raise ValueError("approval is already decided")
         if current.requested_by == principal.user_id:
             raise AuthorizationError("requester cannot approve their own request")
-        updated = ApprovalRecord(current.approval_id, current.workflow_id, current.artifact_id, current.artifact_version, current.risk_assessment_id, current.requested_by, decision, principal.user_id, rationale.strip())
+        updated = ApprovalRecord(
+            current.approval_id,
+            current.workflow_id,
+            current.artifact_id,
+            current.artifact_version,
+            current.risk_assessment_id,
+            current.requested_by,
+            decision,
+            principal.user_id,
+            rationale.strip(),
+        )
         self._requests[approval_id] = updated
         return updated
 
