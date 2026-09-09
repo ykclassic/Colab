@@ -14,8 +14,10 @@ from colab.security import (
     Principal,
     RateLimiter,
     SecurityMiddleware,
+    auth_required,
     authenticate_bearer,
     current_principal,
+    principal_from_test_header,
     require_permission,
     require_workspace_membership,
 )
@@ -51,6 +53,42 @@ def test_supabase_jwt_rejects_bad_audience(monkeypatch: pytest.MonkeyPatch) -> N
     token = jwt.encode({"sub": str(uuid4()), "aud": "wrong", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS256")
     with pytest.raises(ValueError, match="invalid or expired"):
         authenticate_bearer(token)
+
+
+def test_authentication_edge_cases_and_test_auth_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("COLAB_JWT_SECRET", raising=False)
+    with pytest.raises(ValueError, match="empty bearer"):
+        authenticate_bearer("")
+    with pytest.raises(ValueError, match="SUPABASE_URL"):
+        authenticate_bearer("not-a-jwt")
+
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("COLAB_JWT_SECRET", "test-secret")
+    with pytest.raises(ValueError, match="unsupported local JWT algorithm"):
+        token = jwt.encode({"sub": str(uuid4()), "aud": "authenticated", "iss": "https://example.supabase.co/auth/v1", "iat": int(time.time()), "exp": int(time.time()) + 300, "app_metadata": {"colab_role": "reviewer"}}, "test-secret", algorithm="HS384")
+        monkeypatch.delenv("COLAB_JWT_SECRET")
+        authenticate_bearer(token)
+
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "false")
+    with pytest.raises(ValueError, match="disabled"):
+        principal_from_test_header("tester", "reviewer")
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
+    with pytest.raises(ValueError, match="invalid test role"):
+        principal_from_test_header("tester", "invalid")
+    assert principal_from_test_header("tester", "reviewer").role is PlatformRole.REVIEWER
+
+
+def test_auth_mode_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("COLAB_REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("COLAB_ENV", raising=False)
+    assert not auth_required()
+    monkeypatch.setenv("COLAB_ENV", "production")
+    assert auth_required()
+    monkeypatch.setenv("COLAB_REQUIRE_AUTH", "false")
+    assert not auth_required()
+    monkeypatch.setenv("COLAB_REQUIRE_AUTH", "TRUE")
+    assert auth_required()
 
 
 def test_security_principal_and_membership_branches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +128,20 @@ def test_security_middleware_rate_limit_and_headers() -> None:
     assert first.status_code == 200
     assert first.headers["x-content-type-options"] == "nosniff"
     assert second.status_code == 429
+
+
+def test_security_middleware_scopes_workspace_requests() -> None:
+    app = FastAPI()
+    app.state.services = type("Services", (), {"database": None})()
+    app.add_middleware(SecurityMiddleware)
+
+    @app.get("/api/workspaces/{workspace_id}")
+    def workspace(request: Request) -> dict[str, bool]:
+        assert isinstance(request.state.principal, Principal)
+        return {"ok": True}
+
+    client = TestClient(app)
+    assert client.get(f"/api/workspaces/{uuid4()}").status_code == 200
 
 
 def test_security_middleware_protects_api_when_auth_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
