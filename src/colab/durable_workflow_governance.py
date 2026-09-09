@@ -1,10 +1,7 @@
-"""Durable workflow/governance state-machine verification primitives.
-
-The state machine is deliberately deterministic and append-only. It is a
-verification boundary, not an execution authority.
-"""
+"""Durable workflow/governance state-machine verification primitives."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -12,7 +9,10 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
 
+from psycopg import Connection
+
 from .contracts import Stage, WorkflowState
+from .security import AuthorizationError, Permission, Principal, membership_role, require_permission
 from .workflow_integrity import WorkflowIntegrityError, state_hash, validate_event_chain
 
 
@@ -81,7 +81,6 @@ class DurableGovernanceStateMachine:
         self.binding = binding
         self._state: GovernanceState | None = None
         self._events: list[GovernanceEvent] = []
-        self._invalidated_reason: str | None = None
         self._expires_at: datetime | None = None
 
     @property
@@ -92,6 +91,10 @@ class DurableGovernanceStateMachine:
     def events(self) -> tuple[GovernanceEvent, ...]:
         return tuple(self._events)
 
+    @property
+    def current_input_digest(self) -> str:
+        return self.binding.governed_input_digest if self.binding else ""
+
     def transition(self, target: GovernanceState, actor: str, reason: str = "", *, now: datetime | None = None) -> GovernanceEvent:
         if target not in self._TRANSITIONS[self._state]:
             source = self._state.value if self._state else "none"
@@ -99,8 +102,6 @@ class DurableGovernanceStateMachine:
         if not actor.strip():
             raise GovernanceStateError("governance transition requires an actor")
         timestamp = now or datetime.now(UTC)
-        if target == GovernanceState.PROMOTED and self._state != GovernanceState.APPROVED:
-            raise GovernanceStateError("promotion requires an approved governance decision")
         previous_hash = self._events[-1].event_hash if self._events else None
         payload = f"{self.approval_id}|{self._state}|{target}|{actor}|{timestamp.isoformat()}|{self.current_input_digest}|{previous_hash}|{reason}"
         event_hash = sha256(payload.encode("utf-8")).hexdigest()
@@ -110,19 +111,14 @@ class DurableGovernanceStateMachine:
         self._state = target
         return event
 
-    @property
-    def current_input_digest(self) -> str:
-        if self.binding is None:
-            return ""
-        return self.binding.governed_input_digest
-
     def set_expiry(self, expires_at: datetime) -> None:
         if expires_at.tzinfo is None:
             raise GovernanceStateError("expiry must be timezone-aware")
         self._expires_at = expires_at
 
     def expire_if_due(self, *, now: datetime | None = None, actor: str = "governance-system") -> bool:
-        if self._expires_at is None or self._state in {None, GovernanceState.PROMOTED, GovernanceState.REJECTED, GovernanceState.INVALIDATED, GovernanceState.SUPERSEDED, GovernanceState.EXPIRED}:
+        terminal = {GovernanceState.PROMOTED, GovernanceState.REJECTED, GovernanceState.INVALIDATED, GovernanceState.SUPERSEDED, GovernanceState.EXPIRED}
+        if self._expires_at is None or self._state in {None, *terminal}:
             return False
         timestamp = now or datetime.now(UTC)
         if timestamp < self._expires_at:
@@ -137,11 +133,11 @@ class DurableGovernanceStateMachine:
             raise GovernanceStateError("invalidation reason is required")
         if new_input_digest == self.current_input_digest:
             raise GovernanceStateError("governed input digest did not change")
-        self._invalidated_reason = reason.strip()
         return self.transition(GovernanceState.INVALIDATED, actor, reason, now=now)
 
     def supersede(self, reason: str, *, actor: str = "governance-system", now: datetime | None = None) -> GovernanceEvent:
-        if self._state not in {GovernanceState.DRAFT, GovernanceState.SUBMITTED, GovernanceState.RISK_REVIEW, GovernanceState.RISK_APPROVED, GovernanceState.HUMAN_REVIEW, GovernanceState.APPROVED}:
+        active = {GovernanceState.DRAFT, GovernanceState.SUBMITTED, GovernanceState.RISK_REVIEW, GovernanceState.RISK_APPROVED, GovernanceState.HUMAN_REVIEW, GovernanceState.APPROVED}
+        if self._state not in active:
             raise GovernanceStateError("only active governance can be superseded")
         return self.transition(GovernanceState.SUPERSEDED, actor, reason, now=now)
 
@@ -151,21 +147,22 @@ class DurableGovernanceStateMachine:
             if event.previous_event_hash != previous:
                 raise WorkflowIntegrityError(f"governance event {index} has invalid previous hash")
             payload = f"{event.approval_id}|{event.from_state}|{event.to_state}|{event.actor}|{event.occurred_at.isoformat()}|{event.governed_input_digest}|{event.previous_event_hash}|{event.reason}"
-            expected = sha256(payload.encode("utf-8")).hexdigest()
-            if event.event_hash != expected:
+            if event.event_hash != sha256(payload.encode("utf-8")).hexdigest():
                 raise WorkflowIntegrityError(f"governance event {index} hash mismatch")
             previous = event.event_hash
         if self._events and self._events[-1].to_state != self._state:
             raise WorkflowIntegrityError("governance terminal state does not match event chain")
 
 
-def verify_workflow_replay(original: WorkflowState, snapshots: list[dict[str, Any]], events: list[dict[str, Any]]) -> WorkflowState:
-    """Verify durable snapshots/events and return the final replayed state.
+def require_workflow_replay_access(principal: Principal, workspace_id: UUID, connection_factory: Callable[[], Connection[Any]]) -> None:
+    """Require audit permission and workspace membership before replay/restore."""
+    require_permission(principal, Permission.AUDIT_READ)
+    if membership_role(connection_factory, workspace_id, principal.user_id) is None:
+        raise AuthorizationError("principal is not a member of the workflow workspace")
 
-    Replay is intentionally conservative: every event must reference an
-    existing checkpoint, hashes must agree, and the final checkpoint must
-    describe the supplied original workflow identity.
-    """
+
+def verify_workflow_replay(original: WorkflowState, snapshots: list[dict[str, Any]], events: list[dict[str, Any]]) -> WorkflowState:
+    """Verify durable snapshots/events and return the final replayed state."""
     if not snapshots or not events:
         raise WorkflowIntegrityError("replay requires at least one checkpoint and event")
     validate_event_chain(events)
