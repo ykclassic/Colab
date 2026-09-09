@@ -14,7 +14,7 @@ from .productization import StrategySpec, Workspace
 from .research_api import router as research_router
 from .research_intelligence import ResearchIntelligence
 from .research_persistence import PostgresResearchIntelligenceStore
-from .security import Permission, SecurityMiddleware, authorize_endpoint, current_principal
+from .security import Permission, RateLimiter, SecurityMiddleware, authorize_endpoint, current_principal
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -144,19 +144,15 @@ def register_workspace_routes(app: FastAPI) -> None:
     if not hasattr(app.state, "external_integrations"):
         app.state.external_integrations = ExternalIntegrationRegistry()
         register_external_integration_routes(app, app.state.external_integrations)
-    if not any(cast(Any, middleware).cls is SecurityMiddleware for middleware in app.user_middleware):
-        cast(Any, app).add_middleware(
-            SecurityMiddleware,
-            requests_per_minute=int(os.getenv("COLAB_RATE_LIMIT_PER_MINUTE", "120")),
-        )
+    if not any(getattr(middleware, "cls", None) is SecurityMiddleware for middleware in app.user_middleware):
+        rate_limit = int(os.getenv("COLAB_RATE_LIMIT_PER_MINUTE", "120"))
+        app.add_middleware(SecurityMiddleware, rate_limiter=RateLimiter(limit=rate_limit))
 
     @app.get("/api/auth/me")
     def auth_me(request: Request) -> dict[str, str | None]:
         principal = current_principal(request)
         return {"user_id": principal.user_id, "role": principal.role.value, "email": principal.email, "session_id": principal.session_id}
 
-    # The legacy Phase 3 create/list handlers live in api.py. Replace those two
-    # routes with tenant-aware handlers without duplicating the public path.
     @app.post("/api/workspaces", response_model=Workspace, status_code=201, include_in_schema=False)
     def secure_create_workspace(payload: SecureWorkspaceCreate, request: Request, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> Workspace:
         return _secure_workspace_create(request, payload, idempotency_key)
