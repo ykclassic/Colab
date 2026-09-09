@@ -18,7 +18,6 @@ class FakeCursor:
         self.rows: list[dict[str, object]] = []
 
     def execute(self, sql: str, params: object = None) -> None:
-        del params
         normalized = " ".join(sql.split()).lower()
         self.rowcount = 0
         if normalized.startswith("insert into public.governance_strategy_versions"):
@@ -37,6 +36,10 @@ class FakeCursor:
             self.row = None
         elif normalized.startswith("insert into public.governance_approvals"):
             self.rowcount = 1
+            if isinstance(params, tuple) and len(params) > 9 and params[9] in {"approve", "reject"}:
+                updated = dict(self.state["approval"])  # type: ignore[arg-type]
+                updated.update({"decision": params[9], "decided_by": params[10], "rationale": params[11], "decided_at": params[14]})
+                self.state["approval"] = updated
             self.state["approval_inserted"] = True
         elif "select workspace_id from public.governance_approvals" in normalized:
             approval = self.state["approval"]  # type: ignore[assignment]
