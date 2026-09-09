@@ -5,7 +5,7 @@ import os
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .external_integration import ExternalIntegrationRegistry
@@ -132,7 +132,7 @@ def _secure_workspace_list(request: Request, include_archived: bool) -> list[Wor
     return [services.workspaces.get(workspace_id) for workspace_id in ids]
 
 
-def register_workspace_routes(app: Any) -> None:
+def register_workspace_routes(app: FastAPI) -> None:
     """Register lifecycle/research routes and Phase 13 security boundaries."""
     app.include_router(router)
     if not hasattr(app.state, "research_intelligence"):
