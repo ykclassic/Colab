@@ -16,10 +16,11 @@ from .quant_lab import (
     FeatureEngineer,
     MarketBar,
     MarketDataset,
-    QuantLabError,
     QuantitativeResearchLab,
+    QuantLabError,
 )
 from .quant_persistence import PostgresQuantStore
+from .quant_platform import ExperimentRecord as DurableExperiment
 from .quant_platform import (
     InMemoryStrategyRegistry,
     StrategyRecord,
@@ -28,7 +29,6 @@ from .quant_platform import (
     robustness_analysis,
     stress_test,
 )
-from .quant_platform import ExperimentRecord as DurableExperiment
 from .security import Permission, require_workspace_membership
 from .service_adapters import production_connection_factory_from_dsn
 
