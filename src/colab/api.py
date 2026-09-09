@@ -5,7 +5,7 @@ import os
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -143,8 +143,6 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     def operations_events(workflow_id: UUID | None = None, workspace_id: UUID | None = None, job_id: UUID | None = None, limit: int = Query(default=100, ge=1, le=1000)) -> list[OperationalEvent]:
         if workspace_id is None:
             raise HTTPException(status_code=422, detail="workspace_id is required")
-        request = None
-        # Kept as a query-only service endpoint; SecurityMiddleware handles authentication.
         return services.observability.query(workflow_id, workspace_id, job_id, limit)
 
     @app.get("/", response_class=HTMLResponse)
@@ -184,7 +182,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
         return services.artifacts.list(workspace_id)
 
     @app.post("/api/knowledge", response_model=KnowledgeDocument, status_code=201)
-    def add_knowledge(payload: KnowledgeCreate, request: Any) -> KnowledgeDocument:
+    def add_knowledge(payload: KnowledgeCreate, request: Request) -> KnowledgeDocument:
         require_workspace_membership(request, payload.workspace_id, Permission.RESEARCH_WRITE)
         try:
             return services.knowledge.upsert(KnowledgeDocument(**payload.model_dump()))
@@ -192,7 +190,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="knowledge document belongs to another workspace") from exc
 
     @app.get("/api/knowledge/search", response_model=list[KnowledgeDocument])
-    def search_knowledge(request: Any, q: str = Query(min_length=1), workspace_id: UUID = Query(...), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
+    def search_knowledge(request: Request, q: str = Query(min_length=1), workspace_id: UUID = Query(...), limit: int = Query(default=10, ge=1, le=100)) -> list[KnowledgeDocument]:
         require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
         return services.knowledge.search(q, limit, workspace_id)
 
