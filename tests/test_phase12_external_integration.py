@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.error import URLError
 
 import pytest
 from fastapi import FastAPI
@@ -17,10 +18,32 @@ from colab.external_integration_api import register_external_integration_routes
 def test_connector_requires_https_and_scopes_paths() -> None:
     with pytest.raises(ValueError):
         ConnectorDefinition("data", "http://example.com", ("/v1",))
-    registry = ExternalIntegrationRegistry(lambda *_args, **_kwargs: b'{}')
+    registry = ExternalIntegrationRegistry(lambda *_args, **_kwargs: b"{}")
     registry.register(ConnectorDefinition("data", "https://example.com", ("/v1",)))
     with pytest.raises(ExternalIntegrationError):
         registry.fetch_json("data", "/admin")
+
+
+def test_connector_definition_rejects_invalid_limits_and_names() -> None:
+    with pytest.raises(ValueError):
+        ConnectorDefinition("bad name", "https://example.com")
+    with pytest.raises(ValueError):
+        ConnectorDefinition("data", "https://example.com", ("../private",))
+    with pytest.raises(ValueError):
+        ConnectorDefinition("data", "https://example.com", timeout_seconds=0.01)
+    with pytest.raises(ValueError):
+        ConnectorDefinition("data", "https://example.com", max_response_bytes=100)
+
+
+def test_registry_rejects_duplicate_and_unknown_connectors() -> None:
+    registry = ExternalIntegrationRegistry()
+    definition = ConnectorDefinition("data", "https://example.com")
+    registry.register(definition)
+    assert registry.list_connectors() == (definition,)
+    with pytest.raises(ExternalIntegrationError, match="already registered"):
+        registry.register(definition)
+    with pytest.raises(ExternalIntegrationError, match="unknown connector"):
+        registry.get("missing")
 
 
 def test_execution_capabilities_are_not_registerable() -> None:
@@ -49,6 +72,26 @@ def test_fetch_is_read_only_bounded_and_audited() -> None:
     assert registry.audit()[0].success is True
 
 
+def test_fetch_rejects_invalid_query_and_json_shapes() -> None:
+    registry = ExternalIntegrationRegistry(lambda *_args, **_kwargs: b"null")
+    registry.register(ConnectorDefinition("data", "https://data.example.com"))
+    with pytest.raises(ExternalIntegrationError, match="invalid query"):
+        registry.fetch_json("data", "/", {"bad=key": "value"})
+    with pytest.raises(ExternalIntegrationError, match="JSON object or array"):
+        registry.fetch_json("data")
+    assert registry.audit()[-1].success is False
+
+
+def test_fetch_records_transport_failures() -> None:
+    registry = ExternalIntegrationRegistry(lambda *_args, **_kwargs: (_ for _ in ()).throw(URLError("offline")))
+    registry.register(ConnectorDefinition("data", "https://data.example.com"))
+    with pytest.raises(ExternalIntegrationError, match="URLError"):
+        registry.fetch_json("data")
+    audit = registry.audit()[-1]
+    assert audit.success is False
+    assert audit.error == "URLError"
+
+
 def test_oversized_responses_are_rejected_without_leaking_payload() -> None:
     registry = ExternalIntegrationRegistry(lambda *_args, **_kwargs: b"x" * 2049)
     registry.register(ConnectorDefinition("data", "https://data.example.com", ("/",), max_response_bytes=2048))
@@ -63,7 +106,11 @@ def test_http_api_exposes_only_read_operation() -> None:
     app = FastAPI()
     register_external_integration_routes(app, registry)
     client = TestClient(app)
+    assert client.get("/api/integrations").json()[0]["read_only"] is True
     response = client.post("/api/integrations/data/fetch", json={"path": "/"})
     assert response.status_code == 200
     assert response.json()["read_only"] is True
+    assert client.get("/api/integrations/data/audit").status_code == 200
+    assert client.get("/api/integrations/missing/audit").status_code == 404
     assert client.post("/api/integrations/data/order", json={}).status_code == 404
+    assert client.post("/api/integrations/data/fetch", json={"path": "/", "extra": True}).status_code == 422
