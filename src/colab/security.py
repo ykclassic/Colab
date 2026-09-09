@@ -41,22 +41,12 @@ class Permission(StrEnum):
 
 ROLE_PERMISSIONS: dict[PlatformRole, frozenset[Permission]] = {
     PlatformRole.OWNER: frozenset(Permission),
-    PlatformRole.PROJECT_MANAGER: frozenset(
-        {
-            Permission.WORKSPACE_READ,
-            Permission.WORKSPACE_WRITE,
-            Permission.AUDIT_READ,
-            Permission.APPROVE,
-            Permission.INTEGRATION_READ,
-        }
-    ),
+    PlatformRole.PROJECT_MANAGER: frozenset({Permission.WORKSPACE_READ, Permission.WORKSPACE_WRITE, Permission.AUDIT_READ, Permission.APPROVE, Permission.INTEGRATION_READ}),
     PlatformRole.RESEARCHER: frozenset({Permission.WORKSPACE_READ, Permission.RESEARCH_WRITE}),
     PlatformRole.STRATEGY: frozenset({Permission.WORKSPACE_READ, Permission.STRATEGY_WRITE}),
     PlatformRole.RISK: frozenset({Permission.WORKSPACE_READ, Permission.RISK_ASSESS, Permission.AUDIT_READ}),
     PlatformRole.ENGINEER: frozenset({Permission.WORKSPACE_READ, Permission.IMPLEMENT, Permission.VALIDATE}),
-    PlatformRole.REVIEWER: frozenset(
-        {Permission.WORKSPACE_READ, Permission.APPROVE, Permission.AUDIT_READ, Permission.INTEGRATION_READ}
-    ),
+    PlatformRole.REVIEWER: frozenset({Permission.WORKSPACE_READ, Permission.APPROVE, Permission.AUDIT_READ, Permission.INTEGRATION_READ}),
 }
 
 
@@ -110,26 +100,12 @@ def authenticate_bearer(token: str) -> Principal:
         if secret:
             if algorithm not in {"HS256", "HS384", "HS512"}:
                 raise AuthenticationError("unsupported local JWT algorithm")
-            claims: dict[str, Any] = jwt.decode(
-                token,
-                secret,
-                algorithms=[algorithm],
-                audience=audience,
-                issuer=issuer,
-                options={"require": ["sub", "exp", "iat", "iss", "aud"]},
-            )
+            claims: dict[str, Any] = jwt.decode(token, secret, algorithms=[algorithm], audience=audience, issuer=issuer, options={"require": ["sub", "exp", "iat", "iss", "aud"]})
         else:
             if algorithm not in {"RS256", "ES256", "EdDSA"}:
                 raise AuthenticationError("unsupported Supabase JWT algorithm")
             key = _jwks_client(f"{issuer}/.well-known/jwks.json").get_signing_key_from_jwt(token).key
-            claims = jwt.decode(
-                token,
-                key,
-                algorithms=[algorithm],
-                audience=audience,
-                issuer=issuer,
-                options={"require": ["sub", "exp", "iat", "iss", "aud"]},
-            )
+            claims = jwt.decode(token, key, algorithms=[algorithm], audience=audience, issuer=issuer, options={"require": ["sub", "exp", "iat", "iss", "aud"]})
     except (jwt.PyJWTError, AuthenticationError, ValueError, OSError) as exc:
         raise AuthenticationError("invalid or expired access token") from exc
     subject = claims.get("sub")
@@ -143,19 +119,16 @@ def authenticate_bearer(token: str) -> Principal:
         role = PlatformRole(raw_role)
     except ValueError as exc:
         raise AuthenticationError("access token has no valid Colab role") from exc
-    return Principal(
-        user_id=subject,
-        role=role,
-        session_id=str(claims["session_id"]) if claims.get("session_id") else None,
-        email=str(claims["email"]) if claims.get("email") else None,
-    )
+    return Principal(user_id=subject, role=role, session_id=str(claims["session_id"]) if claims.get("session_id") else None, email=str(claims["email"]) if claims.get("email") else None)
 
 
 def principal_from_test_header(user_id: str, role: str) -> Principal:
+    if os.getenv("COLAB_ALLOW_TEST_AUTH", "false").lower() != "true":
+        raise ValueError("test authentication is disabled")
     try:
         return Principal(user_id=user_id, role=PlatformRole(role))
     except ValueError as exc:
-        raise AuthenticationError("invalid test role") from exc
+        raise ValueError("invalid test role") from exc
 
 
 def require_permission(principal: Principal, permission: Permission) -> None:
@@ -181,7 +154,7 @@ def current_principal(request: Request) -> Principal:
         if test_user and test_role:
             try:
                 principal = principal_from_test_header(test_user, test_role)
-            except AuthenticationError as exc:
+            except ValueError as exc:
                 raise HTTPException(status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}) from exc
             request.state.principal = principal
             return principal
@@ -202,19 +175,12 @@ def membership_role(connection_factory: Any, workspace_id: UUID, user_id: str) -
     except ValueError:
         return None
     with connection_factory() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT role FROM public.workspace_memberships WHERE workspace_id=%s AND user_id=%s",
-            (workspace_id, user_uuid),
-        )
+        cur.execute("SELECT role FROM public.workspace_memberships WHERE workspace_id=%s AND user_id=%s", (workspace_id, user_uuid))
         row = cur.fetchone()
     return None if row is None else str(row[0])
 
 
-def require_workspace_membership(
-    request: Request,
-    workspace_id: UUID,
-    permission: Permission = Permission.WORKSPACE_READ,
-) -> Principal:
+def require_workspace_membership(request: Request, workspace_id: UUID, permission: Permission = Permission.WORKSPACE_READ) -> Principal:
     principal = current_principal(request)
     services = getattr(request.app.state, "services", None)
     database = getattr(services, "database", None)
@@ -233,7 +199,10 @@ def require_workspace_membership(
             raise HTTPException(status_code=403, detail="insufficient permissions") from exc
         request.state.workspace_role = scoped_role
         return scoped
-    require_permission(principal, permission)
+    try:
+        require_permission(principal, permission)
+    except AuthorizationError as exc:
+        raise HTTPException(status_code=403, detail="insufficient permissions") from exc
     return principal
 
 
@@ -310,14 +279,7 @@ class SecurityMiddleware:
         async def secure_send(message: dict[str, Any]) -> None:
             if message.get("type") == "http.response.start":
                 response_headers = list(message.get("headers", []))
-                response_headers.extend(
-                    [
-                        (b"x-content-type-options", b"nosniff"),
-                        (b"x-frame-options", b"DENY"),
-                        (b"referrer-policy", b"no-referrer"),
-                        (b"cache-control", b"no-store"),
-                    ]
-                )
+                response_headers.extend([(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"), (b"referrer-policy", b"no-referrer"), (b"cache-control", b"no-store")])
                 message = {**message, "headers": response_headers}
             await send(message)
 
@@ -333,25 +295,58 @@ class SecurityMiddleware:
 @dataclass(frozen=True)
 class ApprovalRecord:
     approval_id: str
+    workflow_id: str
     artifact_id: str
-    approved_by: str
+    risk_assessment_id: str
+    requested_by: str
     decision: str
+    decided_by: str | None = None
+    rationale: str | None = None
+    required_reviewers: int = 1
 
 
 class ApprovalService:
+    """Compatibility approval service with explicit independent human decisioning."""
+
     def __init__(self) -> None:
-        self._records: list[ApprovalRecord] = []
+        self._records: dict[str, ApprovalRecord] = {}
+
+    def request(self, approval_id: str, workflow_id: str, artifact_id: str, required_reviewers: int, risk_assessment_id: str, principal: Principal) -> ApprovalRecord:
+        require_permission(principal, Permission.APPROVE)
+        if required_reviewers < 1:
+            raise ValueError("required reviewers must be at least one")
+        if approval_id in self._records:
+            raise ValueError("approval already exists")
+        record = ApprovalRecord(approval_id, workflow_id, artifact_id, risk_assessment_id, principal.user_id, "pending", None, None, required_reviewers)
+        self._records[approval_id] = record
+        return record
+
+    def decide(self, approval_id: str, principal: Principal, decision: str, rationale: str) -> ApprovalRecord:
+        require_permission(principal, Permission.APPROVE)
+        record = self._records.get(approval_id)
+        if record is None:
+            raise KeyError("approval not found")
+        if record.decision != "pending":
+            raise ValueError("approval already decided")
+        if principal.user_id == record.requested_by:
+            raise AuthorizationError("requester cannot approve their own request")
+        if decision not in {"approve", "reject"}:
+            raise ValueError("decision must be approve or reject")
+        if not rationale.strip():
+            raise ValueError("rationale is required")
+        decided = ApprovalRecord(record.approval_id, record.workflow_id, record.artifact_id, record.risk_assessment_id, record.requested_by, decision, principal.user_id, rationale.strip(), record.required_reviewers)
+        self._records[approval_id] = decided
+        return decided
+
+    def get(self, approval_id: str) -> ApprovalRecord:
+        return self._records[approval_id]
 
     def submit(self, artifact_id: str, principal: Principal, decision: str) -> ApprovalRecord:
         require_permission(principal, Permission.APPROVE)
-        record = ApprovalRecord(
-            approval_id=f"approval-{len(self._records) + 1}",
-            artifact_id=artifact_id,
-            approved_by=principal.user_id,
-            decision=decision,
-        )
-        self._records.append(record)
+        approval_id = f"approval-{len(self._records) + 1}"
+        record = ApprovalRecord(approval_id, "", artifact_id, "", principal.user_id, decision, principal.user_id, "legacy submission", 1)
+        self._records[approval_id] = record
         return record
 
     def list(self) -> list[ApprovalRecord]:
-        return list(self._records)
+        return list(self._records.values())
