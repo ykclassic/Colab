@@ -142,7 +142,7 @@ class ExternalIntegrationRegistry:
         if secret:
             headers["Authorization"] = f"Bearer {secret}"
         request = Request(final_url, headers=headers, method="GET")
-        with urlopen(request, timeout=definition.timeout_seconds) as response:  # noqa: S310 - host is validated above
+        with urlopen(request, timeout=definition.timeout_seconds) as response:
             return response.read(definition.max_response_bytes + 1)
 
     def _record(self, request_id: UUID, connector: str, path: str, status_code: int | None, success: bool, error: str | None) -> None:
