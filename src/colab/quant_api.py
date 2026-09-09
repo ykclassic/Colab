@@ -12,10 +12,15 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .quant_lab import FeatureEngineer, MarketBar, MarketDataset, QuantLabError, QuantitativeResearchLab
+from .quant_lab import (
+    FeatureEngineer,
+    MarketBar,
+    MarketDataset,
+    QuantLabError,
+    QuantitativeResearchLab,
+)
 from .quant_persistence import PostgresQuantStore
 from .quant_platform import (
-    ExperimentRecord as DurableExperiment,
     InMemoryStrategyRegistry,
     StrategyRecord,
     monte_carlo,
@@ -23,6 +28,7 @@ from .quant_platform import (
     robustness_analysis,
     stress_test,
 )
+from .quant_platform import ExperimentRecord as DurableExperiment
 from .security import Permission, require_workspace_membership
 from .service_adapters import production_connection_factory_from_dsn
 
