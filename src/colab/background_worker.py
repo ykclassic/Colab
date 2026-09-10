@@ -1,5 +1,5 @@
 # ruff: noqa: I001, BLE001
-"""Phase 21G worker: lease jobs, execute workloads, publish artifacts."""
+"""Phase 21G/21H worker: lease jobs, execute workloads, publish artifacts with traces."""
 from __future__ import annotations
 import os
 import socket
@@ -8,6 +8,7 @@ from math import isnan
 from typing import Any
 from .background_job_handlers import report_generation, research_ingestion
 from .background_jobs_store import PostgresJobQueue
+from .observability import correlation, job_context, observe_job, registry, span
 from .quant_lab import FeatureEngineer, QuantitativeResearchLab
 from .quant_platform import monte_carlo, robustness_analysis
 
@@ -35,11 +36,25 @@ class BackgroundWorker:
  def run_once(self)->bool:
   job=self.queue.claim(self.worker_id)
   if job is None:return False
-  try:
-   handler=HANDLERS[job.job_type]
-   def progress(value:int,message:str)->None:self.queue.progress(job.job_id,self.worker_id,value,message); self.queue.heartbeat(job.job_id,self.worker_id)
-   result=handler(job.payload,progress); self.queue.complete(job.job_id,self.worker_id,result,job.job_type)
-  except Exception as exc:self.queue.fail(job.job_id,self.worker_id,f"{type(exc).__name__}: {exc}")
+  started=time.perf_counter()
+  attempt=getattr(job,"attempts",1)
+  with correlation(getattr(job,"correlation_id",None)):
+   with job_context(str(job.job_id)):
+    with span("workflow.job",attributes={"job.type":job.job_type,"job.attempt":attempt,"worker.id":self.worker_id,"workspace.id":job.workspace_id}):
+     try:
+      handler=HANDLERS[job.job_type]
+      with span("agent.handler",attributes={"job.type":job.job_type}):
+       def progress(value:int,message:str)->None:
+        with span("job.progress",attributes={"progress.value":value}):
+         self.queue.progress(job.job_id,self.worker_id,value,message); self.queue.heartbeat(job.job_id,self.worker_id)
+       with span("job.execute",attributes={"job.type":job.job_type}): result=handler(job.payload,progress)
+      with span("artifact.write",attributes={"job.type":job.job_type}): self.queue.complete(job.job_id,self.worker_id,result,job.job_type)
+      registry.increment("jobs.completed"); observe_job("completed",(time.perf_counter()-started)*1000,job.job_type,attempt)
+     except Exception as exc:
+      with span("job.failure",attributes={"error.type":type(exc).__name__}) as failure_span:
+       failure_span.record_exception(exc)
+      self.queue.fail(job.job_id,self.worker_id,f"{type(exc).__name__}: {exc}")
+      registry.increment("jobs.failed"); observe_job("failed",(time.perf_counter()-started)*1000,job.job_type,attempt)
   return True
  def run_forever(self,poll_seconds:float=2.0)->None:
   while True:
