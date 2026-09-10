@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from .background_jobs_api import register_background_job_routes
 from .collaboration_api import register_collaboration_routes
-from .operations import ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
+from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
 from .production_persistence import PostgresPlatformStore
 from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
 from .quant_api import register_quant_routes
@@ -115,7 +115,7 @@ def create_app(services:PlatformServices|None=None)->FastAPI:
  @app.post("/api/executions/{job_id}/fail",response_model=ExecutionJob)
  def fail_execution(job_id:UUID,payload:ExecutionFailure)->ExecutionJob:
   try:
-   job=services.execution.fail(job_id,payload.worker_id,payload.error); services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_failed",level="error",actor=payload.worker_id,message="Execution job failed.",metadata={"error":payload.error})); return job
+   job=services.execution.fail(job_id,payload.worker_id,payload.error); services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_failed",level=EventLevel.ERROR,actor=payload.worker_id,message="Execution job failed.",metadata={"error":payload.error})); return job
   except (KeyError,PermissionError,RuntimeError,ValueError) as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
  @app.post("/api/executions/{job_id}/cancel",response_model=ExecutionJob)
  def cancel_execution(job_id:UUID)->ExecutionJob:
