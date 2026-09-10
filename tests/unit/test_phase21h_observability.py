@@ -16,10 +16,8 @@ def test_correlation_id_is_stable_inside_context() -> None:
 
 
 def test_span_records_context_attributes() -> None:
-    with correlation("corr-span"):
-        with job_context(str(uuid4())):
-            with span("test.boundary", attributes={"workflow.id": UUID(int=0), "attempt": 2}) as current:
-                assert current.is_recording()
+    with correlation("corr-span"), job_context(str(uuid4())), span("test.boundary", attributes={"workflow.id": UUID(int=0), "attempt": 2}) as current:
+        assert current.is_recording()
 
 
 def test_structured_formatter_is_json() -> None:
