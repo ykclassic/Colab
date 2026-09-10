@@ -142,7 +142,7 @@ def span(name: str, *, attributes: dict[str, Any] | None = None) -> Iterator[Spa
             raise
 
 
-def instrument_boundary(name: str):
+def instrument_boundary(name: str) -> Any:
     def decorator(function: Any) -> Any:
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             with span(
@@ -166,7 +166,11 @@ def observe_job(status: str, duration_ms: float, job_type: str, attempt: int = 1
 
 
 def observe_http(method: str, route: str, status_code: int, duration_ms: float) -> None:
-    attrs = {"method": method, "route": route, "status_code": status_code}
+    attrs: dict[str, str | int] = {
+        "method": method,
+        "route": route,
+        "status_code": status_code,
+    }
     request_counter.add(1, attrs)
     request_latency.record(duration_ms, attrs)
 
