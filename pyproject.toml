@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "colab-agent-platform"
-version = "0.4.0"
+version = "0.8.0"
 description = "Production-grade multi-agent collaboration platform"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,9 @@ dependencies = [
   "pydantic>=2.10,<3",
   "psycopg[binary]>=3.2,<4",
   "PyJWT[crypto]>=2.10,<3",
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +50,7 @@ ignore = ["E501", "RUF012"]
 "src/colab/research_platform_api.py" = ["I001"]
 "tests/unit/test_phase21b_database_integrity.py" = ["I001"]
 "tests/unit/test_phase21c_database_governance_integrity.py" = ["I001"]
+"tests/unit/test_phase21h_observability.py" = ["I001"]
 
 [tool.mypy]
 python_version = "3.12"
