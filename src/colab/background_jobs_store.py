@@ -1,4 +1,4 @@
-# ruff: noqa: I001, UP035, F401
+# ruff: noqa: I001
 """PostgreSQL implementation of the Phase 21G queue contract."""
 from __future__ import annotations
 import json
@@ -7,7 +7,6 @@ from uuid import UUID
 from collections.abc import Callable
 from psycopg import Connection
 from .background_jobs import BackgroundJob, JobArtifact, JobEvent
-
 class PostgresJobQueue:
  def __init__(self,connection_factory:Callable[[],Connection[Any]],lease_seconds:int=300)->None:
   if lease_seconds<1:raise ValueError("lease_seconds must be positive")
@@ -53,8 +52,7 @@ class PostgresJobQueue:
    return self._job(row)
  def cancel(self,job_id:UUID)->BackgroundJob:
   with self.connection_factory() as c,c.transaction(),c.cursor() as x:
-   x.execute("UPDATE public.background_jobs SET status='cancelled',completed_at=now() WHERE job_id=%s AND status NOT IN ('succeeded','failed','cancelled') RETURNING *",(job_id,)); row=x.fetchone()
-   return self._job(row) if row else self.get(job_id)
+   x.execute("UPDATE public.background_jobs SET status='cancelled',completed_at=now() WHERE job_id=%s AND status NOT IN ('succeeded','failed','cancelled') RETURNING *",(job_id,)); row=x.fetchone(); return self._job(row) if row else self.get(job_id)
  def events_for(self,job_id:UUID)->list[JobEvent]:
   with self.connection_factory() as c,c.cursor() as x:
    x.execute("SELECT event_id,job_id,workspace_id,status,progress,message,metadata,created_at FROM public.background_job_events WHERE job_id=%s ORDER BY created_at",(job_id,)); return [JobEvent(event_id=r[0],job_id=r[1],workspace_id=r[2],status=r[3],progress=r[4],message=r[5],metadata=r[6] or {},created_at=r[7]) for r in x.fetchall()]
