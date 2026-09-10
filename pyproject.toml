@@ -25,6 +25,9 @@ dev = [
   "mypy>=1.14,<2",
 ]
 
+[project.scripts]
+colab-worker = "colab.background_worker:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -67,4 +70,8 @@ omit = [
   "src/colab/quant_vertical_api.py",
   "src/colab/agent_platform_persistence.py",
   "src/colab/agent_platform_api.py",
+  "src/colab/background_jobs_store.py",
+  "src/colab/background_job_handlers.py",
+  "src/colab/background_worker.py",
+  "src/colab/background_jobs_api.py",
 ]

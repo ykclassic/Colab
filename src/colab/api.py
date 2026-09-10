@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .background_jobs_api import register_background_job_routes
 from .collaboration_api import register_collaboration_routes
 from .operations import (
     EventLevel,
@@ -60,7 +61,6 @@ _KNOWLEDGE_QUERY = Query(min_length=1)
 _KNOWLEDGE_WORKSPACE = Query(...)
 _KNOWLEDGE_LIMIT = Query(default=10, ge=1, le=100)
 
-
 class WorkspaceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
@@ -68,13 +68,11 @@ class WorkspaceCreate(BaseModel):
     priority: int = Field(default=100, ge=0, le=1000)
     strategies: list[StrategySpec] = Field(default_factory=list)
 
-
 class ArtifactCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(min_length=1, max_length=100)
     producer: str = Field(min_length=1, max_length=100)
     content: dict[str, Any]
-
 
 class KnowledgeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,7 +82,6 @@ class KnowledgeCreate(BaseModel):
     source: str = Field(min_length=1, max_length=1000)
     tags: list[str] = Field(default_factory=list)
 
-
 class ExecutionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workflow_id: UUID
@@ -93,19 +90,15 @@ class ExecutionCreate(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=255)
     max_attempts: int = Field(default=3, ge=1, le=20)
 
-
 class ExecutionAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     worker_id: str = Field(min_length=1, max_length=255)
 
-
 class ExecutionFailure(ExecutionAction):
     error: str = Field(min_length=1, max_length=5000)
 
-
 class PlatformServices:
     """Compose local deterministic services or durable PostgreSQL services."""
-
     def __init__(self, max_concurrent: int = 2, database_dsn: str | None = None) -> None:
         dsn = database_dsn or os.getenv("COLAB_DATABASE_DSN")
         production = os.getenv("COLAB_ENV", "development").lower() == "production"
@@ -148,7 +141,6 @@ class PlatformServices:
         for tool in defaults:
             self.tools.register(tool)
 
-
 def create_app(services: PlatformServices | None = None) -> FastAPI:
     services = services or PlatformServices(max_concurrent=int(os.getenv("COLAB_MAX_CONCURRENT_WORKSPACES", "2")))
     app = FastAPI(title="Colab Agent Platform", version="0.7.0")
@@ -163,6 +155,7 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
     register_collaboration_routes(app)
     register_quant_routes(app)
     register_release_governance_routes(app)
+    register_background_job_routes(app)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -289,7 +282,6 @@ def create_app(services: PlatformServices | None = None) -> FastAPI:
 
     return app
 
-
 app = create_app()
 register_workspace_routes(app)
 
@@ -303,8 +295,7 @@ button{cursor:pointer;width:auto}.grid{display:grid;grid-template-columns:1fr 1f
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
 </style></head><body>
 <h1>Colab Agent Platform</h1><p>Phase 11 adds production validation, reproducibility manifests, immutable strategy versions, regression gates, promotion controls, and readiness scoring.</p>
-<div class="grid"><section class="card"><h2>New workspace</h2><input id="name" placeholder="Workspace name"><textarea id="goal" placeholder="Product goal"></textarea>
-<button onclick="createWorkspace()">Create workspace</button><p id="workspaceResult"></p></section>
+<div class="grid"><section class="card"><h2>New workspace</h2><input id="name" placeholder="Workspace name"><textarea id="goal" placeholder="Product goal"></textarea><button onclick="createWorkspace()">Create workspace</button><p id="workspaceResult"></p></section>
 <section class="card"><h2>Operations</h2><div id="metrics">Loading…</div></section></div>
 <section class="card"><h2>Workspaces</h2><div id="workspaces">Loading…</div></section>
 <section class="card"><h2>Approved tools</h2><div id="tools">Loading…</div></section>
