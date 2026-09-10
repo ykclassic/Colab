@@ -123,6 +123,8 @@ def authenticate_bearer(token: str) -> Principal:
 
 
 def principal_from_test_header(user_id: str, role: str) -> Principal:
+    if os.getenv("COLAB_ENV", "development").lower() == "production":
+        raise ValueError("test authentication is disabled in production")
     if os.getenv("COLAB_ALLOW_TEST_AUTH", "false").lower() != "true":
         raise ValueError("test authentication is disabled")
     try:
@@ -149,7 +151,7 @@ def current_principal(request: Request) -> Principal:
             raise HTTPException(status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}) from exc
         request.state.principal = principal
         return principal
-    if os.getenv("COLAB_ALLOW_TEST_AUTH", "false").lower() == "true":
+    if os.getenv("COLAB_ENV", "development").lower() != "production" and os.getenv("COLAB_ALLOW_TEST_AUTH", "false").lower() == "true":
         test_user, test_role = request.headers.get("X-Test-User"), request.headers.get("X-Test-Role")
         if test_user and test_role:
             try:
