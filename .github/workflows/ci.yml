@@ -26,6 +26,8 @@ jobs:
         run: mypy src
       - name: Test
         run: pytest --cov=colab --cov-report=term-missing --cov-fail-under=90
+      - name: Production-readiness certification
+        run: pytest tests/test_phase21j_production_readiness.py
 
   frontend:
     runs-on: ubuntu-latest
