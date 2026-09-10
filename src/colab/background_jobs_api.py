@@ -1,10 +1,10 @@
-# ruff: noqa: I001, BLE001
 """Phase 21G/21H API: durable jobs plus production observability."""
 from __future__ import annotations
 
 import os
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .background_jobs import InMemoryJobQueue
 from .background_jobs_store import PostgresJobQueue
-from .observability import correlation, correlation_id, observe_http, registry, span
+from .observability import correlation, observe_http, registry, span
 from .security import Permission, require_workspace_membership
 
 
