@@ -1,4 +1,3 @@
-# ruff: noqa: I001
 """HTTP interface for Phase 3 productization and Phase 4 operations."""
 from __future__ import annotations
 import os
@@ -9,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from .background_jobs_api import register_background_job_routes
 from .collaboration_api import register_collaboration_routes
-from .operations import EventLevel, ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
+from .operations import ExecutionCoordinator, ExecutionJob, MetricsSnapshot, ObservabilityRecorder, OperationalEvent
 from .production_persistence import PostgresPlatformStore
 from .productization import ArtifactRecord, InMemoryArtifactStore, KnowledgeBase, KnowledgeDocument, StrategySpec, ToolDefinition, ToolRegistry, Workspace, WorkspaceManager, build_artifact
 from .quant_api import register_quant_routes
