@@ -23,25 +23,25 @@ def register_background_job_routes(app:Any,queue:Any=None)->None:
  else:q=InMemoryJobQueue()
  app.state.background_jobs=q
  @router.post("",status_code=202)
- def enqueue(payload:JobCreate,request:Request):
+ def enqueue(payload:JobCreate,request:Request)->Any:
   require_workspace_membership(request,payload.workspace_id,Permission.RESEARCH_WRITE)
   try:return q.enqueue(payload.workspace_id,payload.job_type,payload.payload,payload.idempotency_key,payload.workflow_id,payload.max_attempts)
   except ValueError as exc:raise HTTPException(status_code=422,detail=str(exc)) from exc
  @router.get("")
- def list_jobs(request:Request,workspace_id:UUID,limit:int=Query(100,ge=1,le=1000)):
+ def list_jobs(request:Request,workspace_id:UUID,limit:int=Query(100,ge=1,le=1000))->Any:
   require_workspace_membership(request,workspace_id,Permission.WORKSPACE_READ); return q.list(workspace_id,limit)
  @router.get("/{job_id}")
- def status(job_id:UUID,request:Request):
+ def status(job_id:UUID,request:Request)->Any:
   try:j=q.get(job_id)
   except KeyError as exc:raise HTTPException(status_code=404,detail="job not found") from exc
   require_workspace_membership(request,j.workspace_id,Permission.WORKSPACE_READ); return j
  @router.get("/{job_id}/events")
- def events(job_id:UUID,request:Request):
+ def events(job_id:UUID,request:Request)->Any:
   try:j=q.get(job_id)
   except KeyError as exc:raise HTTPException(status_code=404,detail="job not found") from exc
   require_workspace_membership(request,j.workspace_id,Permission.WORKSPACE_READ); return q.events_for(job_id)
  @router.get("/{job_id}/artifact")
- def artifact(job_id:UUID,request:Request):
+ def artifact(job_id:UUID,request:Request)->Any:
   try:j=q.get(job_id)
   except KeyError as exc:raise HTTPException(status_code=404,detail="job not found") from exc
   require_workspace_membership(request,j.workspace_id,Permission.WORKSPACE_READ)
@@ -49,7 +49,7 @@ def register_background_job_routes(app:Any,queue:Any=None)->None:
   if hasattr(q,"artifacts"):return q.artifacts[j.artifact_id]
   return q.artifact(job_id)
  @router.post("/{job_id}/cancel")
- def cancel(job_id:UUID,request:Request):
+ def cancel(job_id:UUID,request:Request)->Any:
   try:j=q.get(job_id)
   except KeyError as exc:raise HTTPException(status_code=404,detail="job not found") from exc
   require_workspace_membership(request,j.workspace_id,Permission.RESEARCH_WRITE); return q.cancel(job_id)
