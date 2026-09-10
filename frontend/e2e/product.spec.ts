@@ -8,7 +8,7 @@ test('Command Center turns a user goal into a visible workflow plan', async ({ p
   await expect(page.getByText('Recommended workflow')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Quant Validation → Governance' })).toBeVisible();
   for (const stage of ['Quant', 'Agents', 'Governance', 'Artifact / Report']) {
-    await expect(page.getByText(stage, { exact: true })).toBeVisible();
+    await expect(page.locator('.command-bar .nested .stage span').filter({ hasText: stage })).toBeVisible();
   }
 });
 
