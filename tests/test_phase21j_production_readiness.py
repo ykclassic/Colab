@@ -7,7 +7,6 @@ real production-like environment.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from uuid import UUID
 
@@ -15,7 +14,6 @@ import pytest
 
 from colab.agent_platform_vertical_slice import version_transition_allowed
 from colab.background_jobs import InMemoryJobQueue
-from colab.productization import Workspace
 from colab.quant_vertical_slice import QuantVerticalSliceError
 from colab.security import PlatformRole, principal_from_test_header
 
@@ -129,7 +127,8 @@ def test_frontend_e2e_certification() -> None:
 
 def test_no_live_execution_authority_is_exposed_to_default_tools() -> None:
     source = (SRC / "api.py").read_text()
-    assert "execution" not in source.split("def _register_safe_defaults", 1)[1].split("def create_app", 1)[0]
+    defaults = source.split("def _register_safe_defaults", 1)[1].split("def create_app", 1)[0]
+    assert "execution" not in defaults
     readme = (ROOT / "README.md").read_text()
     assert "not currently a live autonomous trading platform" in readme
 
@@ -154,7 +153,7 @@ def _workspace_agent():
         workspace_id=UUID(int=4),
         name="certification-agent",
         version=2,
+        role="researcher",
         code_revision="certification",
         model="deterministic-test-model",
-        capabilities=("research",),
     )
