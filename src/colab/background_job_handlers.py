@@ -2,7 +2,7 @@
 """Production workload handlers kept outside the HTTP request lifecycle."""
 from __future__ import annotations
 from hashlib import sha256
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 def research_ingestion(payload:dict[str,Any],progress:Any)->dict[str,Any]:
@@ -16,10 +16,10 @@ def research_ingestion(payload:dict[str,Any],progress:Any)->dict[str,Any]:
  progress(95,"Research artifact ready"); return {"document_id":str(document.document_id),"dataset_id":payload["dataset_id"],"extraction":extraction.model_dump(mode="json"),"chunk_count":len(chunks)}
 
 def report_generation(payload:dict[str,Any],progress:Any)->dict[str,Any]:
- from .research_platform import build_report,citation_id_for,rerank,validate_citations
+ from .research_platform import RetrievalCandidate, build_report,citation_id_for,rerank,validate_citations
  from .research_platform_api import ResearchPlatformServices
  services=ResearchPlatformServices(database_dsn=payload.get("database_dsn"),production=bool(payload.get("production",False))); progress(15,"Retrieving cited evidence"); query=payload["query"]; limit=int(payload.get("limit",10)); candidate_limit=int(payload.get("candidate_limit",40)); vector=services.embedder.embed(query)
- hits=services.store.hybrid_search(workspace_id=UUID(payload["workspace_id"]),query=query,embedding=vector,limit=candidate_limit,candidate_limit=candidate_limit) if services.store else services.engine.search(query,limit=candidate_limit,workspace_id=UUID(payload["workspace_id"])); ranked=rerank(query,hits,limit); citations=[]; evidence={}
+ hits=services.store.hybrid_search(workspace_id=UUID(payload["workspace_id"]),query=query,embedding=vector,limit=candidate_limit,candidate_limit=candidate_limit) if services.store else services.engine.search(query,limit=candidate_limit,workspace_id=UUID(payload["workspace_id"])); ranked=rerank(query,cast(list[RetrievalCandidate],hits),limit); citations=[]; evidence={}
  for h in ranked:
   cid=citation_id_for(h.source_id,h.chunk_id); citations.append({"citation_id":cid,"chunk_id":str(h.chunk_id),"document_id":str(h.document_id),"dataset_id":None,"title":h.title,"uri":h.uri,"quote":" ".join(h.text.split())[:1000]}); evidence[cid]=h.text
  progress(60,"Validating citations"); validations=validate_citations(citations,evidence)
