@@ -1,3 +1,4 @@
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -14,7 +15,6 @@ def test_register_hashes_config_and_uses_supplied_agent_id() -> None:
     agent_id = uuid4()
     platform = AgentPlatformVerticalSlice()
     version = platform.register(agent_id, {"model": "test", "temperature": 0})
-
     assert version.agent_id == agent_id
     assert version.version == 1
     assert version.status == "DRAFT"
@@ -25,12 +25,8 @@ def test_register_hashes_config_and_uses_supplied_agent_id() -> None:
 def test_evaluate_validates_registration_score_and_evidence() -> None:
     platform = AgentPlatformVerticalSlice()
     version = platform.register(config={"model": "test"})
-
     evaluation = platform.evaluate(
-        version,
-        task_type="research",
-        benchmark_id="bench-1",
-        score=0.8,
+        version, task_type="research", benchmark_id="bench-1", score=0.8,
         evidence=["source-a", "source-b"],
     )
     assert evaluation.agent_id == version.agent_id
@@ -40,23 +36,19 @@ def test_evaluate_validates_registration_score_and_evidence() -> None:
     assert evaluation.evidence == ("source-a", "source-b")
     assert platform.store.list_evaluations(version.agent_id) == [evaluation]
     assert platform.store.list_evaluations(version.agent_id, "other") == []
-
     with pytest.raises(ValueError, match="between 0 and 1"):
         platform.evaluate(version, task_type="research", benchmark_id="b", score=1.1)
     with pytest.raises(ValueError, match="between 0 and 1"):
         platform.evaluate(version, task_type="research", benchmark_id="b", score=-0.1)
-
-    unknown = AgentVersion(uuid4(), 1, "hash")
     with pytest.raises(AgentGovernanceError, match="not registered"):
-        platform.evaluate(unknown, task_type="research", benchmark_id="b", score=0.5)
+        platform.evaluate(AgentVersion(uuid4(), 1, "hash"), task_type="research", benchmark_id="b", score=0.5)
 
 
-def test_record_performance_builds_deterministic_window_and_counts_prior() -> None:
+def test_record_performance_builds_window_and_counts_prior() -> None:
     platform = AgentPlatformVerticalSlice()
     version = platform.register(config={})
-    first = platform.evaluate(version, task_type="research", benchmark_id="b", score=0.6)
+    platform.evaluate(version, task_type="research", benchmark_id="b", score=0.6)
     second = platform.evaluate(version, task_type="research", benchmark_id="b", score=0.7)
-
     performance = platform.record_performance(second, window="rolling-7d")
     assert performance.agent_id == version.agent_id
     assert performance.score == 0.7
@@ -65,17 +57,12 @@ def test_record_performance_builds_deterministic_window_and_counts_prior() -> No
     assert platform.store.performance == [performance]
 
 
-def test_arbitration_requires_matching_evidence_and_has_stable_tie_break() -> None:
+def test_arbitration_requires_matching_evidence() -> None:
     platform = AgentPlatformVerticalSlice()
     first_version = platform.register(uuid4(), {})
     second_version = platform.register(uuid4(), {})
-    first = platform.evaluate(
-        first_version, task_type="research", benchmark_id="b", score=0.8, evidence=["a"]
-    )
-    second = platform.evaluate(
-        second_version, task_type="research", benchmark_id="b", score=0.7, evidence=["b"]
-    )
-
+    first = platform.evaluate(first_version, task_type="research", benchmark_id="b", score=0.8, evidence=["a"])
+    second = platform.evaluate(second_version, task_type="research", benchmark_id="b", score=0.7, evidence=["b"])
     decision = platform.arbitrate([second, first], task_type="research")
     assert decision.winner_agent_id == first.agent_id
     assert decision.winner_version == 1
@@ -83,11 +70,7 @@ def test_arbitration_requires_matching_evidence_and_has_stable_tie_break() -> No
     assert decision.evidence == (first.evaluation_id,)
     assert len(decision.decision_hash) == 64
     assert platform.store.decisions == [decision]
-
-    no_evidence = platform.evaluate(
-        first_version, task_type="research", benchmark_id="b", score=0.99, evidence=[]
-    )
-    assert platform.arbitrate([no_evidence], task_type="research") is not None if False else True
+    no_evidence = platform.evaluate(first_version, task_type="research", benchmark_id="b", score=0.99, evidence=[])
     with pytest.raises(AgentGovernanceError, match="task-matched evaluations with evidence"):
         platform.arbitrate([no_evidence], task_type="research")
     with pytest.raises(AgentGovernanceError, match="task-matched evaluations with evidence"):
@@ -104,7 +87,6 @@ def test_arbitration_tie_break_is_deterministic() -> None:
     high = platform.register(high_id, {})
     low_eval = platform.evaluate(low, task_type="research", benchmark_id="b", score=0.5, evidence=["l"])
     high_eval = platform.evaluate(high, task_type="research", benchmark_id="b", score=0.5, evidence=["h"])
-
     decision = platform.arbitrate([high_eval, low_eval], task_type="research")
     assert decision.winner_agent_id == low_id
 
@@ -113,19 +95,15 @@ def test_memory_lifecycle_and_validation() -> None:
     platform = AgentPlatformVerticalSlice()
     agent_id = uuid4()
     evidence_id = uuid4()
-    memory = platform.write_memory(
-        agent_id, task_type="research", content="validated finding", evidence_ids=(evidence_id,)
-    )
+    memory = platform.write_memory(agent_id, task_type="research", content="validated finding", evidence_ids=(evidence_id,))
     assert memory.agent_id == agent_id
     assert memory.active is True
-    assert memory.content_hash == __import__("hashlib").sha256(b"validated finding").hexdigest()
+    assert memory.content_hash == sha256(b"validated finding").hexdigest()
     assert platform.store.memories[memory.memory_id] == memory
-
     deactivated = platform.deactivate_memory(memory.memory_id)
     assert deactivated.active is False
     assert deactivated.memory_id == memory.memory_id
     assert platform.store.memories[memory.memory_id] == deactivated
-
     with pytest.raises(AgentGovernanceError, match="content and evidence"):
         platform.write_memory(agent_id, task_type="research", content="   ", evidence_ids=(evidence_id,))
     with pytest.raises(AgentGovernanceError, match="content and evidence"):
@@ -142,7 +120,6 @@ def test_cost_validates_non_negative_inputs() -> None:
     assert record.output_tokens == 50
     assert record.cost == pytest.approx(0.15)
     assert platform.store.costs == [record]
-
     with pytest.raises(ValueError, match="non-negative"):
         platform.cost(version, task_type="research", input_tokens=-1, output_tokens=1)
     with pytest.raises(ValueError, match="non-negative"):
@@ -154,17 +131,10 @@ def test_cost_validates_non_negative_inputs() -> None:
 def test_run_completes_full_governed_lifecycle_and_promotes_version() -> None:
     platform = AgentPlatformVerticalSlice(AgentPlatformStore())
     result = platform.run(
-        config={"model": "test"},
-        task_type="research",
-        benchmark_id="bench-1",
-        score=0.9,
-        evidence=["source"],
-        baseline_score=0.8,
-        memory_content="validated result",
-        input_tokens=100,
-        output_tokens=50,
+        config={"model": "test"}, task_type="research", benchmark_id="bench-1", score=0.9,
+        evidence=["source"], baseline_score=0.8, memory_content="validated result",
+        input_tokens=100, output_tokens=50,
     )
-
     assert result.agent_version.status == "PROMOTED"
     assert result.evaluation.benchmark_id == "bench-1"
     assert result.performance.sample_count == 1
@@ -179,14 +149,7 @@ def test_run_completes_full_governed_lifecycle_and_promotes_version() -> None:
 def test_run_rejects_regression_after_recording_evidence() -> None:
     platform = AgentPlatformVerticalSlice()
     with pytest.raises(AgentGovernanceError, match="regression detected"):
-        platform.run(
-            config={},
-            task_type="research",
-            benchmark_id="bench-1",
-            score=0.4,
-            evidence=["source"],
-            baseline_score=0.5,
-        )
+        platform.run(config={}, task_type="research", benchmark_id="bench-1", score=0.4, evidence=["source"], baseline_score=0.5)
     assert len(platform.store.evaluations) == 1
     assert len(platform.store.performance) == 1
     assert len(platform.store.decisions) == 1
