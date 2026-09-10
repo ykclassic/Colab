@@ -43,7 +43,12 @@ def _install_observability(app: FastAPI) -> None:
             try:
                 response = await call_next(request)
             except Exception:
-                observe_http(request.method, request.url.path, 500, (time.perf_counter() - started) * 1000)
+                observe_http(
+                    request.method,
+                    request.url.path,
+                    500,
+                    (time.perf_counter() - started) * 1000,
+                )
                 registry.increment("http.errors")
                 raise
             duration = (time.perf_counter() - started) * 1000
@@ -73,12 +78,70 @@ def register_background_job_routes(app: Any, queue: Any = None) -> None:
     else:
         q = InMemoryJobQueue()
 
-    # Remaining route definitions intentionally unchanged from the Phase 21G API.
-    _ = q
-    _ = Query
-    _ = HTTPException
-    _ = require_workspace_membership
-    _ = Permission
-    _ = correlation_id
-    _ = registry
-    _ = router
+    app.state.background_jobs = q
+
+    @router.post("", status_code=202)
+    def enqueue(payload: JobCreate, request: Request) -> Any:
+        require_workspace_membership(request, payload.workspace_id, Permission.RESEARCH_WRITE)
+        try:
+            return q.enqueue(
+                payload.workspace_id,
+                payload.job_type,
+                payload.payload,
+                payload.idempotency_key,
+                payload.workflow_id,
+                payload.max_attempts,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("")
+    def list_jobs(
+        request: Request,
+        workspace_id: UUID,
+        limit: int = Query(100, ge=1, le=1000),
+    ) -> Any:
+        require_workspace_membership(request, workspace_id, Permission.WORKSPACE_READ)
+        return q.list(workspace_id, limit)
+
+    @router.get("/{job_id}")
+    def status(job_id: UUID, request: Request) -> Any:
+        try:
+            job = q.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        require_workspace_membership(request, job.workspace_id, Permission.WORKSPACE_READ)
+        return job
+
+    @router.get("/{job_id}/events")
+    def events(job_id: UUID, request: Request) -> Any:
+        try:
+            job = q.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        require_workspace_membership(request, job.workspace_id, Permission.WORKSPACE_READ)
+        return q.events_for(job_id)
+
+    @router.get("/{job_id}/artifact")
+    def artifact(job_id: UUID, request: Request) -> Any:
+        try:
+            job = q.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        require_workspace_membership(request, job.workspace_id, Permission.WORKSPACE_READ)
+        if job.artifact_id is None:
+            return {"status": job.status, "artifact": None}
+        if hasattr(q, "artifacts"):
+            return q.artifacts[job.artifact_id]
+        return q.artifact(job_id)
+
+    @router.post("/{job_id}/cancel")
+    def cancel(job_id: UUID, request: Request) -> Any:
+        try:
+            job = q.get(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        require_workspace_membership(request, job.workspace_id, Permission.RESEARCH_WRITE)
+        return q.cancel(job_id)
+
+    app.include_router(router)
