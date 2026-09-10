@@ -1,12 +1,13 @@
 # ruff: noqa: I001
 """Phase 21G durable background-job contracts and deterministic local queue."""
 from __future__ import annotations
+import builtins
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any, List
+from typing import Any
 from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 JOB_TYPES=frozenset(("research_ingestion","embedding","backtest","monte_carlo","robustness_analysis","report_generation","agent_evaluation"))
@@ -28,9 +29,9 @@ class InMemoryJobQueue:
   if job_type not in JOB_TYPES:raise ValueError(f"unsupported job type: {job_type}")
   key=(workspace_id,idempotency_key)
   if key in self.idempotency:return self.jobs[self.idempotency[key]]
-  now=datetime.now(UTC); job=BackgroundJob(job_id=uuid4(),workspace_id=workspace_id,workflow_id=workflow_id,job_type=job_type,idempotency_key=idempotency_key,payload=payload,max_attempts=max_attempts,created_at=now,updated_at=now); self.jobs[job.job_id]=job; self.idempotency[key]=job.job_id; self._event(job,0,"Job queued"); return job
+  now=datetime.now(UTC); job=BackgroundJob(job_id=uuid4(),workspace_id=workspace_id,workflow_id=workflow_id,job_type=job_type,idempotency_key=idempotency_key,max_attempts=max_attempts,created_at=now,updated_at=now); self.jobs[job.job_id]=job; self.idempotency[key]=job.job_id; self._event(job,0,"Job queued"); return job
  def get(self,job_id:UUID)->BackgroundJob:return self.jobs[job_id]
- def list(self,workspace_id:UUID,limit:int=100)->List[BackgroundJob]:return sorted((j for j in self.jobs.values() if j.workspace_id==workspace_id),key=lambda j:j.created_at,reverse=True)[:limit]
+ def list(self,workspace_id:UUID,limit:int=100)->builtins.list[BackgroundJob]:return sorted((j for j in self.jobs.values() if j.workspace_id==workspace_id),key=lambda j:j.created_at,reverse=True)[:limit]
  def claim(self,worker_id:str)->BackgroundJob|None:
   now=datetime.now(UTC)
   for job in sorted(self.jobs.values(),key=lambda j:(j.created_at,str(j.job_id))):
@@ -53,7 +54,7 @@ class InMemoryJobQueue:
   j=self.jobs[job_id]
   if j.status not in (JobStatus.SUCCEEDED,JobStatus.FAILED,JobStatus.CANCELLED):j.status=JobStatus.CANCELLED; j.completed_at=datetime.now(UTC); j.updated_at=datetime.now(UTC); self._event(j,j.progress,"Job cancelled")
   return j
- def events_for(self,job_id:UUID)->List[JobEvent]:return [e for e in self.events if e.job_id==job_id]
+ def events_for(self,job_id:UUID)->builtins.list[JobEvent]:return [e for e in self.events if e.job_id==job_id]
  def _owner(self,job_id:UUID,worker_id:str)->None:
   j=self.jobs[job_id]
   if j.status!=JobStatus.RUNNING or j.lease_owner!=worker_id:raise PermissionError("worker does not own job lease")
