@@ -1,9 +1,10 @@
 # ruff: noqa: I001
 """PostgreSQL implementation of the Phase 21G queue contract."""
 from __future__ import annotations
+import builtins
 import json
 from collections.abc import Callable
-from typing import Any, List
+from typing import Any
 from uuid import UUID
 from psycopg import Connection
 from .background_jobs import BackgroundJob, JobArtifact, JobEvent
@@ -22,7 +23,7 @@ class PostgresJobQueue:
    x.execute("SELECT * FROM public.background_jobs WHERE job_id=%s",(job_id,)); row=x.fetchone()
    if row is None:raise KeyError(str(job_id))
    return self._job(row)
- def list(self,workspace_id:UUID,limit:int=100)->List[BackgroundJob]:
+ def list(self,workspace_id:UUID,limit:int=100)->builtins.list[BackgroundJob]:
   with self.connection_factory() as c,c.cursor() as x:
    x.execute("SELECT * FROM public.background_jobs WHERE workspace_id=%s ORDER BY created_at DESC LIMIT %s",(workspace_id,limit)); return [self._job(r) for r in x.fetchall()]
  def claim(self,worker_id:str)->BackgroundJob|None:
@@ -57,11 +58,11 @@ class PostgresJobQueue:
  def cancel(self,job_id:UUID)->BackgroundJob:
   with self.connection_factory() as c,c.transaction(),c.cursor() as x:
    x.execute("UPDATE public.background_jobs SET status='cancelled',completed_at=now() WHERE job_id=%s AND status NOT IN ('succeeded','failed','cancelled') RETURNING *",(job_id,)); row=x.fetchone(); return self._job(row) if row else self.get(job_id)
- def events_for(self,job_id:UUID)->List[JobEvent]:
+ def events_for(self,job_id:UUID)->builtins.list[JobEvent]:
   with self.connection_factory() as c,c.cursor() as x:
    x.execute("SELECT event_id,job_id,workspace_id,status,progress,message,metadata,created_at FROM public.background_job_events WHERE job_id=%s ORDER BY created_at",(job_id,)); return [JobEvent(event_id=r[0],job_id=r[1],workspace_id=r[2],status=r[3],progress=r[4],message=r[5],metadata=r[6] or {},created_at=r[7]) for r in x.fetchall()]
  def artifact(self,job_id:UUID)->JobArtifact|None:
-  with self.connection_factory() as c,c.cursor() as x:
+  with self.connection_factory() as c,c.transaction(),c.cursor() as x:
    x.execute("SELECT artifact_id,job_id,workspace_id,kind,content,content_hash,created_at FROM public.background_job_artifacts WHERE job_id=%s ORDER BY created_at DESC LIMIT 1",(job_id,)); r=x.fetchone(); return None if r is None else JobArtifact(artifact_id=r[0],job_id=r[1],workspace_id=r[2],kind=r[3],content=r[4],content_hash=r[5],created_at=r[6])
  def _job(self,r:Any)->BackgroundJob:
   cols=['job_id','workspace_id','workflow_id','job_type','idempotency_key','status','payload','progress','progress_message','attempt','max_attempts','lease_owner','lease_expires_at','artifact_id','result','error','notification_status','notification_error','created_at','started_at','completed_at','updated_at']; return BackgroundJob(**dict(zip(cols,r)))
