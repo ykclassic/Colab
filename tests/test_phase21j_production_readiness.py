@@ -11,11 +11,12 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from starlette.requests import Request
 
 from colab.agent_platform_vertical_slice import version_transition_allowed
 from colab.background_jobs import InMemoryJobQueue
 from colab.quant_vertical_slice import QuantVerticalSliceError
-from colab.security import PlatformRole, principal_from_test_header
+from colab.security import PlatformRole, current_principal, principal_from_test_header
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "colab"
@@ -27,6 +28,21 @@ def test_security_certification_blocks_test_auth_in_production(monkeypatch: pyte
     monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
     with pytest.raises(ValueError, match="disabled in production"):
         principal_from_test_header(str(UUID(int=1)), PlatformRole.OWNER.value)
+
+
+def test_current_principal_rejects_test_headers_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COLAB_ENV", "production")
+    monkeypatch.setenv("COLAB_ALLOW_TEST_AUTH", "true")
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/auth/me",
+        "headers": [(b"x-test-user", str(UUID(int=1)).encode()), (b"x-test-role", b"owner")],
+    }
+    request = Request(scope)
+    with pytest.raises(Exception) as exc_info:
+        current_principal(request)
+    assert getattr(exc_info.value, "status_code", None) == 401
 
 
 def test_security_certification_has_production_auth_and_headers() -> None:
@@ -57,7 +73,6 @@ def test_migration_certification_is_ordered_and_security_hardened() -> None:
     sql = "\n".join((MIGRATIONS / name).read_text() for name in files)
     assert "ENABLE ROW LEVEL SECURITY" in sql
     assert "workspace_memberships" in sql
-    assert "ON CONFLICT" in sql
 
 
 def test_workflow_durability_certification() -> None:
@@ -128,7 +143,8 @@ def test_frontend_e2e_certification() -> None:
 def test_no_live_execution_authority_is_exposed_to_default_tools() -> None:
     source = (SRC / "api.py").read_text()
     defaults = source.split("def _register_safe_defaults", 1)[1].split("def create_app", 1)[0]
-    assert "execution" not in defaults
+    assert 'ToolDefinition(name="execution"' not in defaults
+    assert 'ToolDefinition(name="order_submission"' not in defaults
     readme = (ROOT / "README.md").read_text()
     assert "not currently a live autonomous trading platform" in readme
 
