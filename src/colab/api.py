@@ -102,22 +102,25 @@ def create_app(services:PlatformServices|None=None)->FastAPI:
  def claim_execution(payload:ExecutionAction)->ExecutionJob:
   job=services.execution.claim(payload.worker_id)
   if job is None:raise HTTPException(status_code=409,detail="no execution job available")
-  return job
+  services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_claimed",actor=payload.worker_id,message="Execution job claimed.")); return job
  @app.post("/api/executions/{job_id}/heartbeat",response_model=ExecutionJob)
  def heartbeat_execution(job_id:UUID,payload:ExecutionAction)->ExecutionJob:
   try:return services.execution.heartbeat(job_id,payload.worker_id)
   except (KeyError,PermissionError,RuntimeError) as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
  @app.post("/api/executions/{job_id}/complete",response_model=ExecutionJob)
  def complete_execution(job_id:UUID,payload:ExecutionAction)->ExecutionJob:
-  try:return services.execution.complete(job_id,payload.worker_id)
+  try:
+   job=services.execution.complete(job_id,payload.worker_id); services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_succeeded",actor=payload.worker_id,message="Execution job completed successfully.")); return job
   except (KeyError,PermissionError,RuntimeError) as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
  @app.post("/api/executions/{job_id}/fail",response_model=ExecutionJob)
  def fail_execution(job_id:UUID,payload:ExecutionFailure)->ExecutionJob:
-  try:return services.execution.fail(job_id,payload.worker_id,payload.error)
+  try:
+   job=services.execution.fail(job_id,payload.worker_id,payload.error); services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_failed",level="error",actor=payload.worker_id,message="Execution job failed.",metadata={"error":payload.error})); return job
   except (KeyError,PermissionError,RuntimeError,ValueError) as exc:raise HTTPException(status_code=409,detail=str(exc)) from exc
  @app.post("/api/executions/{job_id}/cancel",response_model=ExecutionJob)
  def cancel_execution(job_id:UUID)->ExecutionJob:
-  try:return services.execution.cancel(job_id)
+  try:
+   job=services.execution.cancel(job_id); services.observability.record(OperationalEvent(workflow_id=job.workflow_id,workspace_id=job.workspace_id,job_id=job.job_id,event_type="execution_cancelled",actor="api",message="Execution job cancelled.")); return job
   except KeyError as exc:raise HTTPException(status_code=404,detail="execution job not found") from exc
  return app
 app=create_app(); register_workspace_routes(app)
