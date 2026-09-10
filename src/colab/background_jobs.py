@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any
+from typing import Any, List
 from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field
 JOB_TYPES=frozenset(("research_ingestion","embedding","backtest","monte_carlo","robustness_analysis","report_generation","agent_evaluation"))
@@ -14,7 +14,7 @@ class JobStatus:
  QUEUED="queued"; RUNNING="running"; SUCCEEDED="succeeded"; FAILED="failed"; CANCELLED="cancelled"
 class BackgroundJob(BaseModel):
  model_config=ConfigDict(extra="forbid")
- job_id:UUID; workspace_id:UUID; workflow_id:UUID|None=None; job_type:str; idempotency_key:str; status:str=JobStatus.QUEUED; payload:dict[str,Any]=Field(default_factory=dict); progress:int=Field(0,ge=0,le=100); progress_message:str|None=None; attempt:int=Field(0,ge=0); max_attempts:int=Field(3,ge=1,le=20); lease_owner:str|None=None; lease_expires_at:datetime|None=None; artifact_id:UUID|None=None; result:dict[str,Any]|None=None; error:str|None=None; notification_status:str="pending"; notification_error:str|None=None; created_at:datetime; started_at:datetime|None=None; completed_at:datetime|None=None; updated_at:datetime
+ job_id:UUID; workspace_id:UUID; workflow_id:UUID|None=None; job_type:str; idempotency_key:str; status:str=JobStatus.QUEUED; payload:dict[str,Any]=Field(default_factory=dict); progress:int=0; progress_message:str|None=None; attempt:int=0; max_attempts:int=3; lease_owner:str|None=None; lease_expires_at:datetime|None=None; artifact_id:UUID|None=None; result:dict[str,Any]|None=None; error:str|None=None; notification_status:str="pending"; notification_error:str|None=None; created_at:datetime; started_at:datetime|None=None; completed_at:datetime|None=None; updated_at:datetime
 class JobEvent(BaseModel):
  model_config=ConfigDict(extra="forbid")
  event_id:UUID=Field(default_factory=uuid4); job_id:UUID; workspace_id:UUID; status:str; progress:int=Field(ge=0,le=100); message:str; metadata:dict[str,Any]=Field(default_factory=dict); created_at:datetime=Field(default_factory=lambda:datetime.now(UTC))
@@ -30,7 +30,7 @@ class InMemoryJobQueue:
   if key in self.idempotency:return self.jobs[self.idempotency[key]]
   now=datetime.now(UTC); job=BackgroundJob(job_id=uuid4(),workspace_id=workspace_id,workflow_id=workflow_id,job_type=job_type,idempotency_key=idempotency_key,payload=payload,max_attempts=max_attempts,created_at=now,updated_at=now); self.jobs[job.job_id]=job; self.idempotency[key]=job.job_id; self._event(job,0,"Job queued"); return job
  def get(self,job_id:UUID)->BackgroundJob:return self.jobs[job_id]
- def list(self,workspace_id:UUID,limit:int=100)->list[BackgroundJob]:return sorted((j for j in self.jobs.values() if j.workspace_id==workspace_id),key=lambda j:j.created_at,reverse=True)[:limit]
+ def list(self,workspace_id:UUID,limit:int=100)->List[BackgroundJob]:return sorted((j for j in self.jobs.values() if j.workspace_id==workspace_id),key=lambda j:j.created_at,reverse=True)[:limit]
  def claim(self,worker_id:str)->BackgroundJob|None:
   now=datetime.now(UTC)
   for job in sorted(self.jobs.values(),key=lambda j:(j.created_at,str(j.job_id))):
@@ -53,7 +53,7 @@ class InMemoryJobQueue:
   j=self.jobs[job_id]
   if j.status not in (JobStatus.SUCCEEDED,JobStatus.FAILED,JobStatus.CANCELLED):j.status=JobStatus.CANCELLED; j.completed_at=datetime.now(UTC); j.updated_at=datetime.now(UTC); self._event(j,j.progress,"Job cancelled")
   return j
- def events_for(self,job_id:UUID)->list[JobEvent]:return [e for e in self.events if e.job_id==job_id]
+ def events_for(self,job_id:UUID)->List[JobEvent]:return [e for e in self.events if e.job_id==job_id]
  def _owner(self,job_id:UUID,worker_id:str)->None:
   j=self.jobs[job_id]
   if j.status!=JobStatus.RUNNING or j.lease_owner!=worker_id:raise PermissionError("worker does not own job lease")
