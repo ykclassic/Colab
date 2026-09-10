@@ -1,4 +1,4 @@
-# ruff: noqa: I001
+# ruff: noqa: I001, BLE001
 """Phase 21G/21H API: durable jobs plus production observability."""
 from __future__ import annotations
 import os
@@ -22,19 +22,17 @@ def _install_observability(app: Any) -> None:
  async def observability_middleware(request: Request, call_next: Any) -> Any:
   incoming=request.headers.get("X-Correlation-ID") or request.headers.get("X-Request-ID")
   started=time.perf_counter()
-  with correlation(incoming) as cid:
-   with span("http.request", attributes={"http.request.method":request.method,"http.route":request.url.path}):
-    try:
-     response=await call_next(request)
-    except Exception:
-     observe_http(request.method,request.url.path,500,(time.perf_counter()-started)*1000); registry.increment("http.errors"); raise
-    duration=(time.perf_counter()-started)*1000
-    observe_http(request.method,request.url.path,response.status_code,duration)
-    response.headers["X-Correlation-ID"]=cid
-    response.headers["X-Request-ID"]=cid
-    return response
+  with correlation(incoming) as cid, span("http.request",attributes={"http.request.method":request.method,"http.route":request.url.path}):
+   try:
+    response=await call_next(request)
+   except Exception:
+    observe_http(request.method,request.url.path,500,(time.perf_counter()-started)*1000); registry.increment("http.errors"); raise
+   duration=(time.perf_counter()-started)*1000
+   observe_http(request.method,request.url.path,response.status_code,duration)
+   response.headers["X-Correlation-ID"]=cid
+   response.headers["X-Request-ID"]=cid
+   return response
  app.state.observability_installed=True
-
 
 def register_background_job_routes(app:Any,queue:Any=None)->None:
  _install_observability(app)
@@ -82,11 +80,9 @@ def register_background_job_routes(app:Any,queue:Any=None)->None:
   except KeyError as exc:raise HTTPException(status_code=404,detail="job not found") from exc
   require_workspace_membership(request,j.workspace_id,Permission.RESEARCH_WRITE); return q.cancel(job_id)
  app.include_router(router)
-
  ops=APIRouter(prefix="/api/observability",tags=["observability"])
  @ops.get("/metrics")
- def metrics() -> dict[str,Any]:
-  return {"correlation_id":correlation_id(),"metrics":registry.snapshot()}
+ def metrics() -> dict[str,Any]: return {"correlation_id":correlation_id(),"metrics":registry.snapshot()}
  @ops.get("/health")
  def health() -> dict[str,Any]:
   result={"status":"ok","worker":"unknown","database":"unknown"}
