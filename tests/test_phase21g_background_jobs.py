@@ -1,6 +1,8 @@
 from uuid import uuid4
+
 import pytest
-from colab.background_jobs import InMemoryJobQueue, JobStatus, JOB_TYPES
+
+from colab.background_jobs import JOB_TYPES, InMemoryJobQueue, JobStatus
 
 
 def test_enqueue_is_idempotent_and_claims_in_order():
