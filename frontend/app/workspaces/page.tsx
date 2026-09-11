@@ -1,9 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import {FormEvent, useEffect, useState} from 'react';
-import {archiveWorkspace, createWorkspace, deleteWorkspace, getWorkspaces, restoreWorkspace, updateWorkspace, Workspace} from '../lib';
+import {archiveWorkspace, createWorkspace, deleteWorkspace, getAuthMe, getWorkspaces, restoreWorkspace, updateWorkspace, Workspace} from '../lib';
 
 const emptyForm = {name: '', product_goal: '', priority: 100};
+
+type Principal = { user_id: string; role: string; email: string | null };
 
 export default function Workspaces() {
   const [items, setItems] = useState<Workspace[]>([]);
@@ -14,12 +17,32 @@ export default function Workspaces() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [principal, setPrincipal] = useState<Principal | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   async function refresh() {
     try { setItems(await getWorkspaces(includeArchived)); }
     catch (err) { setError(err instanceof Error ? err.message : 'Unable to load workspaces.'); }
   }
-  useEffect(() => { void refresh(); }, [includeArchived]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const me = await getAuthMe();
+        setPrincipal(me);
+        setError('');
+      } catch (err) {
+        setPrincipal(null);
+        setError(err instanceof Error ? err.message : 'Authentication required.');
+      } finally {
+        setCheckingAuth(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (principal) void refresh();
+  }, [includeArchived, principal]);
 
   function openCreate() { setEditing(null); setForm(emptyForm); setMessage(''); setError(''); }
   function openEdit(workspace: Workspace) {
@@ -64,6 +87,23 @@ export default function Workspaces() {
     try { await deleteWorkspace(workspace.workspace_id, workspace.version); setMessage('Workspace permanently deleted.'); await refresh(); }
     catch (err) { setError(err instanceof Error ? err.message : 'Unable to delete workspace.'); }
     finally { setBusyId(null); }
+  }
+
+  if (checkingAuth) {
+    return <section className="card"><div className="eyebrow">Secure workspace access</div><h1>Checking authentication…</h1><p className="muted">Verifying your Colab session before loading workspace data.</p></section>;
+  }
+
+  if (!principal) {
+    return <>
+      <header className="page-head"><div><div className="eyebrow">Portfolio</div><h1>Workspaces</h1><p>Workspace data is protected by the production tenant boundary.</p></div></header>
+      <section className="card auth-card">
+        <div className="eyebrow">Authentication required</div>
+        <h2>Sign in to manage workspaces</h2>
+        <p>Your browser does not currently have a valid Colab session. The workspace API correctly rejected the unauthenticated request.</p>
+        <Link className="button" href="/login">Sign in</Link>
+        {error && <p className="muted">API response: {error}</p>}
+      </section>
+    </>;
   }
 
   return <>
